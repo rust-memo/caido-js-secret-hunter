@@ -1,5 +1,5 @@
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "INFO";
-type Confidence = "HIGH" | "MEDIUM" | "LOW";
+export type Confidence = "HIGH" | "MEDIUM" | "LOW";
 export type FindingKind =
   "SECRET" | "CREDENTIAL" | "ENDPOINT" | "IDENTIFIER" | "CONFIGURATION";
 export type ReviewStatus = "NEEDS_REVIEW" | "REVIEWED" | "FALSE_POSITIVE";
@@ -12,8 +12,9 @@ export type RuleDefinition = {
   kind: FindingKind;
   severity: Severity;
   confidence: Confidence;
+  engine?: "REGEX" | "LINK_REFERENCE";
   keywords?: string[];
-  regex: string;
+  regex?: string;
   secretGroup?: number;
   minEntropy?: number;
   minLength?: number;
@@ -26,6 +27,13 @@ export type RulePack = {
   version: string;
   releasedAt: string;
   rules: RuleDefinition[];
+};
+
+export type RuleSummary = Pick<
+  RuleDefinition,
+  "id" | "name" | "kind" | "severity" | "confidence" | "enabled"
+> & {
+  ignored: boolean;
 };
 
 export type DetectedFinding = {
@@ -50,6 +58,7 @@ export type FindingDTO = Omit<DetectedFinding, "rawValue"> & {
   requestId: string;
   responseId: string;
   status: ReviewStatus;
+  reviewNote: string;
   published: boolean;
   createdAt: string;
 };
@@ -85,12 +94,15 @@ export type ScanState = {
   active: number;
   scanned: number;
   findings: number;
+  dropped: number;
   message: string;
 };
 
 export type HunterSettings = {
   scanAllHistory: boolean;
   autoFetch: boolean;
+  includeCredentials: boolean;
+  assetExclusions: string[];
   maxDepth: number;
   maxAssetsPerRoot: number;
   maxBodyBytes: number;
@@ -98,15 +110,72 @@ export type HunterSettings = {
   maxFindings: number;
 };
 
-export type Snapshot = {
-  findings: FindingDTO[];
-  files: SensitiveFileDTO[];
-  assets: AssetDTO[];
+export type ProjectSummary = {
+  findingTotal: number;
+  endpointTotal: number;
+  needsReview: number;
+  reviewed: number;
+  falsePositive: number;
+  critical: number;
+  high: number;
+  fileTotal: number;
+  assetTotal: number;
+  published: number;
+};
+
+export type Overview = {
+  summary: ProjectSummary;
+  recentFindings: FindingDTO[];
   state: ScanState;
   settings: HunterSettings;
   rulePackVersion: string;
   ignoredRules: string[];
   ignoredHosts: string[];
+};
+
+export type FindingQuery = {
+  search: string;
+  severity: "ALL" | Severity;
+  confidence: "ALL" | Confidence;
+  kind: "ALL" | FindingKind;
+  status: "ALL" | ReviewStatus;
+  offset: number;
+  limit: number;
+};
+
+export type FileQuery = {
+  search: string;
+  offset: number;
+  limit: number;
+};
+
+export type AssetQuery = {
+  search: string;
+  status: "ALL" | AssetStatus;
+  offset: number;
+  limit: number;
+};
+
+export type Page<T> = {
+  items: T[];
+  total: number;
+  offset: number;
+  limit: number;
+};
+
+export type DataArea = "overview" | "findings" | "files" | "assets" | "rules";
+
+export type DataChanged = {
+  revision: number;
+  areas: DataArea[];
+};
+
+export type ReportFormat = "html" | "json" | "csv";
+
+export type ReportFile = {
+  filename: string;
+  mediaType: string;
+  content: string;
 };
 
 export type MessageDetails = {
