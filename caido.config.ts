@@ -12,7 +12,7 @@ export default defineConfig({
   id,
   name: "JS Secret Hunter",
   description: "Background JavaScript and text-response secret discovery and review for Caido",
-  version: "1.0.0",
+  version: "1.0.1",
   author: {
     name: "rust-memo",
     email: "rust-memo@users.noreply.github.com",

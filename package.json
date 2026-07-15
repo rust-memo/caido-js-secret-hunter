@@ -1,6 +1,6 @@
 {
   "name": "caido-js-secret-hunter",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Background JavaScript and text-response secret discovery and review for Caido",
   "license": "MIT",
