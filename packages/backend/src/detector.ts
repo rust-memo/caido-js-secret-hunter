@@ -2,6 +2,7 @@ import { Buffer } from "buffer";
 import { createHash } from "crypto";
 
 import bundledRules from "./default-rules.json";
+import { extractEndpointReferences } from "./endpoint-extractor";
 import type {
   DetectedFinding,
   FindingKind,
@@ -15,7 +16,12 @@ const QUOTED = /(['"])(.{8,4096}?)\1/gs;
 const BASE64 =
   /(?:^|[^A-Za-z0-9+/=])([A-Za-z0-9+/]{20,4092}={0,2})(?=$|[^A-Za-z0-9+/=])/g;
 
-type ContentView = { text: string; sourceOffset: number; label: string };
+type ContentView = {
+  text: string;
+  sourceOffset: number;
+  sourceLine: number;
+  label: string;
+};
 type CompiledRule = {
   definition: RuleDefinition;
   regex: RegExp;
@@ -25,17 +31,92 @@ type CompiledRule = {
 
 export const rulePack = bundledRules as RulePack;
 const compiledRules = rulePack.rules
-  .filter((rule) => rule.enabled !== false)
+  .filter((rule) => rule.enabled !== false && rule.engine !== "LINK_REFERENCE")
   .map(compileRule);
+const linkReferenceRule = rulePack.rules.find(
+  (rule) => rule.engine === "LINK_REFERENCE" && rule.enabled !== false,
+);
 
 export function scanText(text: string, assetUrl: string): DetectedFinding[] {
   if (text.trim().length === 0) return [];
   const output = new Map<string, DetectedFinding>();
-  for (const rule of compiledRules) {
-    for (const view of decodedViews(text))
-      scanRule(rule, view, assetUrl, output);
+  const views = decodedViews(text);
+  for (const rule of compiledRules)
+    for (const view of views) scanRule(rule, view, assetUrl, output);
+  if (linkReferenceRule !== undefined)
+    for (const view of views)
+      scanLinkReferences(linkReferenceRule, view, assetUrl, output);
+  const findings = suppressGenericEndpointDuplicates([...output.values()]);
+  const sensitiveValues = findings
+    .filter(
+      (finding) =>
+        finding.kind !== "ENDPOINT" && finding.kind !== "CONFIGURATION",
+    )
+    .map((finding) => finding.rawValue)
+    .sort((left, right) => right.length - left.length);
+  return findings.map((finding) => ({
+    ...finding,
+    preview: redactPreview(finding.preview, sensitiveValues),
+  }));
+}
+
+function scanLinkReferences(
+  definition: RuleDefinition,
+  view: ContentView,
+  assetUrl: string,
+  output: Map<string, DetectedFinding>,
+): void {
+  for (const reference of extractEndpointReferences(view.text, decodeEscapes)) {
+    const start = Math.max(0, view.sourceOffset + reference.start);
+    const end = Math.max(start, view.sourceOffset + reference.end);
+    const valueHash = sha256(reference.value);
+    const fingerprint = sha256(
+      `${assetUrl}\n${definition.id}\n${start}\n${valueHash}`,
+    );
+    output.set(`${definition.id}\n${reference.value}\n${start}`, {
+      fingerprint,
+      valueHash,
+      ruleId: definition.id,
+      ruleName: definition.name,
+      kind: definition.kind,
+      severity: definition.severity,
+      confidence: definition.confidence,
+      assetUrl,
+      line:
+        view.label === "source"
+          ? lineAt(view.text, reference.start)
+          : view.sourceLine,
+      start,
+      end,
+      preview: `${view.label} | ${snippet(
+        view.text,
+        reference.start,
+        reference.end,
+        reference.raw,
+      )}`,
+      maskedValue: redactUrlValue(resolveReference(reference.value, assetUrl)),
+      rawValue: reference.value,
+    });
   }
-  return [...output.values()];
+}
+
+function suppressGenericEndpointDuplicates(
+  findings: DetectedFinding[],
+): DetectedFinding[] {
+  const specific = new Set(
+    findings
+      .filter(
+        (finding) =>
+          finding.ruleId !== "javascript-link-reference" &&
+          (finding.kind === "ENDPOINT" || finding.kind === "CONFIGURATION"),
+      )
+      .map((finding) => finding.valueHash),
+  );
+  return findings.filter(
+    (finding) =>
+      finding.ruleId !== "javascript-link-reference" ||
+      !specific.has(finding.valueHash),
+  );
 }
 
 function scanRule(
@@ -94,7 +175,10 @@ function scanRule(
       severity: rule.definition.severity,
       confidence: rule.definition.confidence,
       assetUrl,
-      line: lineAt(view.text, localStart),
+      line:
+        view.label === "source"
+          ? lineAt(view.text, localStart)
+          : view.sourceLine,
       start,
       end,
       preview: `${view.label} | ${snippet(view.text, localStart, localEnd, value)}`,
@@ -106,6 +190,8 @@ function scanRule(
 }
 
 function compileRule(definition: RuleDefinition): CompiledRule {
+  if (definition.regex === undefined)
+    throw new Error(`Regex rule '${definition.id}' has no pattern`);
   const regex = compileJavaPattern(definition.regex, true);
   const allowlist =
     definition.allowlistRegex === undefined
@@ -133,7 +219,9 @@ function compileJavaPattern(source: string, global: boolean): RegExp {
 }
 
 function decodedViews(text: string): ContentView[] {
-  const views: ContentView[] = [{ text, sourceOffset: 0, label: "source" }];
+  const views: ContentView[] = [
+    { text, sourceOffset: 0, sourceLine: 1, label: "source" },
+  ];
   const seen = new Set<string>();
   const decodedSource = decodeEscapes(text);
   if (decodedSource !== text && !seen.has(decodedSource)) {
@@ -141,6 +229,7 @@ function decodedViews(text: string): ContentView[] {
     views.push({
       text: decodedSource,
       sourceOffset: 0,
+      sourceLine: 1,
       label: "decoded-source",
     });
   }
@@ -159,6 +248,7 @@ function decodedViews(text: string): ContentView[] {
       views.push({
         text: decoded,
         sourceOffset: offset,
+        sourceLine: lineAt(text, offset),
         label: "decoded-js-string",
       });
     }
@@ -181,6 +271,7 @@ function decodedViews(text: string): ContentView[] {
         views.push({
           text: decoded,
           sourceOffset: offset,
+          sourceLine: lineAt(text, offset),
           label: "decoded-base64",
         });
       }
@@ -211,8 +302,8 @@ export function decodeEscapes(value: string): string {
       if (hex.length === length && /^[0-9a-f]+$/i.test(hex)) {
         output += String.fromCharCode(Number.parseInt(hex, 16));
         index += length;
-      } else output += next;
-    } else output += next;
+      } else output += `\\${next}`;
+    } else output += `\\${next}`;
   }
   return output;
 }
@@ -270,8 +361,44 @@ function snippet(
 }
 
 function maskForKind(value: string, kind: FindingKind): string {
-  if (kind === "ENDPOINT" || kind === "CONFIGURATION") return value;
+  if (kind === "ENDPOINT" || kind === "CONFIGURATION")
+    return redactUrlValue(value);
   return mask(value);
+}
+
+function redactPreview(value: string, sensitiveValues: string[]): string {
+  let output = value
+    .replace(
+      /^(Authorization|Cookie|Set-Cookie|Proxy-Authorization):.*$/gim,
+      "$1: [REDACTED]",
+    )
+    .replace(/((?:https?|wss?):\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1[REDACTED]@")
+    .replace(
+      /([?&](?:access_token|api[_-]?key|auth|code|key|password|secret|session|token)=)[^&#\s]+/gi,
+      "$1[REDACTED]",
+    );
+  for (const secret of sensitiveValues)
+    if (secret.length > 0) output = output.split(secret).join(mask(secret));
+  return output;
+}
+
+function redactUrlValue(value: string): string {
+  return value
+    .replace(/((?:https?|wss?):\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1[REDACTED]@")
+    .replace(
+      /([?&](?:access_token|api[_-]?key|auth|code|key|password|secret|session|token)=)[^&#\s]+/gi,
+      "$1[REDACTED]",
+    );
+}
+
+function resolveReference(value: string, assetUrl: string): string {
+  if (value.includes("{param}")) return value;
+  try {
+    // eslint-disable-next-line compat/compat -- Caido's plugin runtime provides the URL API.
+    return new URL(value, assetUrl).toString();
+  } catch {
+    return value;
+  }
 }
 
 function mask(value: string): string {

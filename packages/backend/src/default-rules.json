@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "version": "2026.07.2",
-  "releasedAt": "2026-07-13",
+  "version": "2026.07.3",
+  "releasedAt": "2026-07-16",
   "rules": [
     {
       "id": "aws-access-key-id",
@@ -246,6 +246,14 @@
       "keywords": ["hooks.slack.com", "discord.com/api/webhooks", "office.com/webhook"],
       "regex": "(?i)(https://(?:hooks\\.slack\\.com/services|(?:discord(?:app)?\\.com)/api/webhooks|[^/]*office\\.com/webhook)/[^\\s'\"<>]{12,1000})",
       "secretGroup": 1
+    },
+    {
+      "id": "javascript-link-reference",
+      "name": "JavaScript endpoint or route reference",
+      "kind": "ENDPOINT",
+      "severity": "INFO",
+      "confidence": "LOW",
+      "engine": "LINK_REFERENCE"
     },
     {
       "id": "admin-debug-route",

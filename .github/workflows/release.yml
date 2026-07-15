@@ -1,65 +1,86 @@
-name: 🚀 Release
+name: Release
 
 on:
   workflow_dispatch:
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 env:
-  NODE_VERSION: 20
+  NODE_VERSION: 22
 
 jobs:
   release:
-    name: Release
+    name: Verify, sign, and release
+    if: github.ref_name == 'main'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
 
     steps:
-      - name: Verify main branch
-        run: |
-          if [[ "${{ github.ref_name }}" != "main" ]]; then
-            echo "Release can only be done on the main branch."
-            exit 1
-          fi
-
-      - name: Checkout project
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
+      - name: Checkout repository
+        uses: actions/checkout@v7
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
         with:
-          run_install: true
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run release quality gates
+        run: |
+          pnpm typecheck
+          pnpm test:coverage
+          pnpm lint
+          pnpm knip
+          pnpm audit --audit-level high
 
       - name: Build package
         run: pnpm build
 
-      - name: Sign package
-        working-directory: dist
+      - name: Verify package versions
+        id: meta
         run: |
-          if [[ -z "${{ secrets.PRIVATE_KEY }}" ]]; then
-            echo "PRIVATE_KEY GitHub secret is required."
+          EXPECTED=$(node -p "require('./package.json').version")
+          BACKEND=$(node -p "require('./packages/backend/package.json').version")
+          FRONTEND=$(node -p "require('./packages/frontend/package.json').version")
+          MANIFEST=$(unzip -p dist/plugin_package.zip manifest.json | jq -r .version)
+          test "$EXPECTED" = "$BACKEND"
+          test "$EXPECTED" = "$FRONTEND"
+          test "$EXPECTED" = "$MANIFEST"
+          echo "version=$EXPECTED" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse an existing release tag
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/${{ steps.meta.outputs.version }}" >/dev/null 2>&1; then
+            echo "::error::Release tag ${{ steps.meta.outputs.version }} already exists"
             exit 1
           fi
-          printf '%s\n' "${{ secrets.PRIVATE_KEY }}" > private_key.pem
-          openssl pkeyutl -sign -inkey private_key.pem -out plugin_package.zip.sig -rawin -in plugin_package.zip
-          rm private_key.pem
 
-      - name: Check version
-        id: meta
+      - name: Sign package and create checksums
         working-directory: dist
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
         run: |
-          VERSION=$(unzip -p plugin_package.zip manifest.json | jq -r .version)
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          test -n "$PRIVATE_KEY" || { echo "PRIVATE_KEY GitHub secret is required."; exit 1; }
+          printf '%s\n' "$PRIVATE_KEY" > private_key.pem
+          trap 'rm -f private_key.pem' EXIT
+          openssl pkeyutl -sign -inkey private_key.pem -out plugin_package.zip.sig -rawin -in plugin_package.zip
+          sha256sum plugin_package.zip plugin_package.zip.sig > SHA256SUMS
 
-      - name: Create release
-        uses: caido/action-release@v1
+      - name: Create immutable release
+        uses: caido/action-release@v1.20.0
         with:
           tag: ${{ steps.meta.outputs.version }}
           commit: ${{ github.sha }}
-          body: 'Release ${{ steps.meta.outputs.version }}'
-          artifacts: 'dist/plugin_package.zip,dist/plugin_package.zip.sig'
+          body: "JS Secret Hunter ${{ steps.meta.outputs.version }}. See CHANGELOG.md for details."
+          artifacts: "dist/plugin_package.zip,dist/plugin_package.zip.sig,dist/SHA256SUMS"
           immutableCreate: true

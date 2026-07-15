@@ -1,5 +1,3 @@
-import { Classic } from "@caido/primevue";
-import PrimeVue from "primevue/config";
 import { createApp } from "vue";
 
 import { SDKPlugin } from "./plugins/sdk";
@@ -10,12 +8,6 @@ import App from "./views/App.vue";
 // This is the entry point for the frontend plugin
 export const init = (sdk: FrontendSDK) => {
   const app = createApp(App);
-
-  // Load the PrimeVue component library
-  app.use(PrimeVue, {
-    unstyled: true,
-    pt: Classic,
-  });
 
   // Provide the FrontendSDK
   app.use(SDKPlugin, sdk);

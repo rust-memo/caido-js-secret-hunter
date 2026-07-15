@@ -1,74 +1,89 @@
 # JS Secret Hunter for Caido
 
-Background discovery and review of secrets, credentials, endpoints, identifiers, and sensitive configuration in Caido HTTP History and live responses.
+Professional background discovery and triage of secrets, credentials, endpoints, identifiers, and sensitive configuration in Caido HTTP traffic.
 
-> Use this plugin only on systems you are authorized to test. A match is a candidate, not proof of a valid secret.
+> Use this plugin only on systems you are authorized to test. A match is a review candidate, not proof that a credential is valid.
 
-## What it does
+## Highlights
 
-- Scans existing HTTP History on project open and continues scanning new responses in the background, with a bounded recent-History monitor as a fallback when an event is missed.
-- Analyzes JavaScript, source maps, HTML, JSON, XML, and other text responses with a versioned 40-rule detector pack.
-- Discovers referenced JavaScript files, modules, and source maps and can fetch them recursively.
-- Shows matched files inside the plugin under **Sensitive Files**, with their original Caido request and response.
-- Separates findings, discovered links/configuration, and the asset-fetch graph into dedicated tabs.
-- Supports per-finding and per-file review states: `NEEDS_REVIEW`, `REVIEWED`, and `FALSE_POSITIVE`.
-- Can send the source request to Replay or publish a reviewed, redacted Caido Finding.
-- Supports search, filters, ignored rules/hosts, persistent review decisions, and redacted JSON/CSV export.
+- Scans existing HTTP History and monitors new responses without blocking Caido.
+- Analyzes JavaScript, source maps, HTML, JSON, XML, and other text responses with a versioned 41-rule detector pack.
+- Extracts absolute URLs, root/dot-relative routes, legacy action resources, and dynamic template paths into a dedicated Endpoint Intelligence workspace.
+- Decodes escaped and Base64 content once per response, maps evidence back to the source line, and redacts neighboring credentials from previews.
+- Provides dedicated Dashboard, Findings, Sensitive Files, Assets, Rules, Reports, and Settings workspaces.
+- Uses server-side search, filters, sorting, pagination, and bounded queues so large projects do not send the full dataset to the UI.
+- Supports bulk triage, persistent review notes, reversible rule/host exclusions, Replay handoff, and deduplicated redacted Caido Findings.
+- Exports sanitized HTML, JSON, and CSV reports. CSV cells are protected against spreadsheet-formula injection.
+- Can analyze one saved Caido Request ID without clearing existing project results.
 
 ## Safety and privacy
 
-- Raw secret values are used transiently for detection and are **not persisted** by the plugin.
-- Stored and exported results contain a masked value, a SHA-256 value fingerprint, and a short evidence preview.
-- Automatic asset fetching is restricted to Caido Scope before every request and redirect.
-- `Cookie` and `Authorization` headers are copied only for same-origin asset requests.
-- Fetching is bounded by depth, asset, response-size, History, and finding limits. Pause and cancel controls are available in the UI.
+- Raw matched values are transient and are **not persisted** by the plugin. Stored results contain a masked value, a SHA-256 value hash, and a redacted evidence preview.
+- Automatic asset fetching is **off by default**. When enabled, every request and redirect must remain inside Caido Scope.
+- Forwarding `Cookie` and `Authorization` is a separate, explicit opt-in and is limited to exact same-origin requests.
+- Auto-fetch exclusions are configurable as bounded case-insensitive URL substrings; captured responses remain eligible for local analysis.
+- History, response size, recursion depth, discovered assets, retained findings, and the live work queue are bounded.
+- Saving Settings is non-destructive. Rebuild and clear operations are explicit and confirmed; matching review states and notes survive a rebuild.
+- Data is isolated per Caido project. Switching projects does not delete another project's results.
 
-Review the evidence and test validity manually before reporting a finding. Encoded strings, examples, test keys, and public identifiers can still produce false positives.
+Encoded examples, public identifiers, test keys, and stale credentials can still produce false positives. Validate findings manually before reporting them.
 
 ## Installation
 
-1. Download `plugin_package.zip` and `plugin_package.zip.sig` from the latest GitHub Release.
-2. In Caido, open **Plugins** and choose **Install Package**.
-3. Select `plugin_package.zip`.
+1. Download `plugin_package.zip`, `plugin_package.zip.sig`, and `SHA256SUMS` from the latest GitHub Release.
+2. Verify the checksum and signature:
+
+   ```bash
+   sha256sum --check SHA256SUMS
+   openssl pkeyutl -verify -pubin -inkey PUBLIC_KEY.pem \
+     -sigfile plugin_package.zip.sig -rawin -in plugin_package.zip
+   ```
+
+3. In Caido, open **Plugins**, choose **Install Package**, and select `plugin_package.zip`.
 4. Open **JS Secret Hunter** from the Caido sidebar.
 
-The signature is published alongside the package so the release artifact can be verified with [PUBLIC_KEY.pem](PUBLIC_KEY.pem):
-
-```bash
-openssl pkeyutl -verify -pubin -inkey PUBLIC_KEY.pem \
-  -sigfile plugin_package.zip.sig -rawin -in plugin_package.zip
-```
+The repository's verification key is [PUBLIC_KEY.pem](PUBLIC_KEY.pem).
 
 ## Recommended first run
 
-1. Configure the target in **Caido Scope** before enabling automatic fetch.
-2. Open the plugin and let the initial History scan finish.
-3. Review **Sensitive Files** first, then inspect individual candidates under **Findings**.
-4. Mark confirmed candidates as reviewed and noise as false positive.
+1. Configure the authorized target in **Caido Scope**.
+2. Open the plugin and run **Scan History**.
+3. Review **Sensitive Files**, then triage individual candidates in **Findings**.
+4. Add reviewer notes, mark confirmed candidates as reviewed, and classify noise as false positive.
+5. Enable automatic asset fetching only if captured traffic does not already include the required dependencies.
 
-The default scan covers up to 5,000 recent History entries, 5 MiB per response, two dependency levels, 200 discovered assets per root, and 10,000 findings. All limits are configurable in **Settings**.
+Defaults cover up to 5,000 recent History entries, 5 MiB per response, two dependency levels, 200 assets per root, and 10,000 retained findings. These limits are configurable.
 
 ## Development
 
-Requirements: Node.js 20+ and pnpm 9.
+Requirements:
+
+- Node.js 22 or newer
+- pnpm 11.13.0
+- A Caido version compatible with plugin SDK 0.57.1
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm typecheck
-pnpm test
+pnpm test:coverage
 pnpm lint
 pnpm knip
+pnpm audit --audit-level high
 pnpm build
 ```
 
-The installable package is generated at `dist/plugin_package.zip`.
+The installable package is generated at `dist/plugin_package.zip`. Contribution and release expectations are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## العربية
 
-الإضافة تفحص طلبات **HTTP History** القديمة والجديدة في الخلفية، وتعرض الملفات التي تحتوي على نتائج حساسة داخل واجهة الإضافة نفسها بدل بقائها مجرد ملاحظات في History. افتح تبويب **Sensitive Files** لمراجعة الملف والـrequest والـresponse، ثم صنّف النتائج إلى مؤكدة أو `False Positive`.
+الإضافة تفحص استجابات **HTTP History** القديمة والجديدة في الخلفية، ثم تعرض النتائج في واجهة احترافية تشمل لوحة ملخص، والنتائج، والملفات الحساسة، والأصول، والقواعد، والتقارير، والإعدادات.
 
-قبل تفعيل جلب ملفات JavaScript تلقائيًا، أضف الهدف إلى **Caido Scope**. الإضافة لا تحفظ القيمة السرية الخام؛ بل تحفظ قيمة مخفية وبصمة SHA-256 ومعاينة قصيرة للمراجعة.
+القيم السرية الخام لا تُحفظ؛ يتم الاحتفاظ بقيمة مخفية وبصمة SHA-256 ومعاينة منقّحة فقط. جلب ملفات JavaScript تلقائيًا متوقف افتراضيًا، وأي طلب يتم تفعيله يجب أن يبقى داخل **Caido Scope**. تمرير `Cookie` أو `Authorization` يحتاج موافقة منفصلة ولا يعمل إلا لنفس المصدر تمامًا.
+
+حفظ الإعدادات لا يمسح النتائج. استخدم **Rebuild results** أو **Clear results** فقط عندما تريد ذلك صراحةً، وراجع كل نتيجة يدويًا قبل اعتبارها تسريبًا مؤكدًا.
 
 ## License
 
 [MIT](LICENSE) © 2026 rust-memo
+
+Quoted-link discovery is conceptually inspired by PortSwigger's MIT-licensed [js-link-finder](https://github.com/portswigger/js-link-finder). The Caido extractor is an independent TypeScript implementation with stricter noise filtering, template-route normalization, redaction, and bounded processing. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
