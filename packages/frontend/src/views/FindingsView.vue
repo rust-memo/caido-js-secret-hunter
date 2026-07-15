@@ -8,6 +8,7 @@ import SeverityBadge from "@/components/SeverityBadge.vue";
 import { useConfirm } from "@/plugins/confirm";
 import { useSDK } from "@/plugins/sdk";
 import {
+  createRequestGate,
   formatDate,
   hostOf,
   safeMessage,
@@ -42,6 +43,8 @@ const requestHost = ref<HTMLElement>();
 const responseHost = ref<HTMLElement>();
 const requestEditor = sdk.ui.httpRequestEditor();
 const responseEditor = sdk.ui.httpResponseEditor();
+const listGate = createRequestGate();
+const messageGate = createRequestGate();
 let timer: number | undefined;
 
 type HttpEditor = {
@@ -64,6 +67,8 @@ onMounted(async () => {
 onUpdated(mountEditors);
 onUnmounted(() => {
   if (timer !== undefined) window.clearTimeout(timer);
+  listGate.invalidate();
+  messageGate.invalidate();
 });
 
 watch([search, severity, confidence, kind, status], () => scheduleLoad(0));
@@ -97,17 +102,22 @@ function scheduleLoad(offset: number, refreshSelected = false) {
 }
 
 async function load(offset: number, refreshSelected = false) {
+  const request = listGate.start();
   loading.value = true;
   try {
-    page.value = await sdk.backend.listFindings(query(offset));
+    const nextPage = await sdk.backend.listFindings(query(offset));
+    if (!listGate.isCurrent(request)) return;
+    page.value = nextPage;
     if (refreshSelected && selected.value !== undefined) {
       const current = await sdk.backend.getFinding(selected.value.fingerprint);
-      if (current !== undefined) hydrateSelected(current);
+      if (listGate.isCurrent(request) && current !== undefined)
+        hydrateSelected(current);
     }
   } catch (cause) {
-    sdk.window.showToast(safeMessage(cause), { variant: "error" });
+    if (listGate.isCurrent(request))
+      sdk.window.showToast(safeMessage(cause), { variant: "error" });
   } finally {
-    loading.value = false;
+    if (listGate.isCurrent(request)) loading.value = false;
   }
 }
 
@@ -150,8 +160,10 @@ function mountEditors() {
 }
 
 async function loadMessage(requestId: string) {
+  const request = messageGate.start();
   try {
     const message = await sdk.backend.getMessage(requestId);
+    if (!messageGate.isCurrent(request)) return;
     setEditor(
       requestEditor,
       message?.request ?? "Source request is no longer available in Caido.",
@@ -161,7 +173,8 @@ async function loadMessage(requestId: string) {
       message?.response ?? "Source response is no longer available in Caido.",
     );
   } catch (cause) {
-    sdk.window.showToast(safeMessage(cause), { variant: "error" });
+    if (messageGate.isCurrent(request))
+      sdk.window.showToast(safeMessage(cause), { variant: "error" });
   }
 }
 
@@ -471,6 +484,47 @@ function togglePage() {
           <div class="hunter-value-box">
             <span>Masked value</span><code>{{ selected.maskedValue }}</code>
             <small>SHA-256 {{ selected.valueHash }}</small>
+          </div>
+          <div v-if="selected.endpoint" class="endpoint-detail-card">
+            <div class="endpoint-detail-heading">
+              <span
+                class="endpoint-method"
+                :class="`method-${selected.endpoint.method}`"
+              >
+                {{ selected.endpoint.method }}
+              </span>
+              <div>
+                <strong>Endpoint context</strong>
+                <small>
+                  {{ statusLabel(selected.endpoint.source) }} ·
+                  {{ statusLabel(selected.endpoint.scope) }}
+                </small>
+              </div>
+            </div>
+            <dl class="hunter-detail-grid">
+              <div>
+                <dt>Dynamic</dt>
+                <dd>{{ selected.endpoint.dynamic ? "Yes" : "No" }}</dd>
+              </div>
+              <div>
+                <dt>Parameters</dt>
+                <dd>{{ selected.endpoint.parameters.length }}</dd>
+              </div>
+            </dl>
+            <code class="endpoint-detail-pattern">
+              {{ selected.endpoint.canonical }}
+            </code>
+            <div
+              v-if="selected.endpoint.parameters.length"
+              class="endpoint-parameter-list"
+            >
+              <span
+                v-for="parameter in selected.endpoint.parameters"
+                :key="parameter"
+              >
+                {{ parameter }}
+              </span>
+            </div>
           </div>
           <div class="hunter-evidence-box">
             <span>Redacted evidence</span>

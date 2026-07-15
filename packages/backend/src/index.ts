@@ -6,6 +6,8 @@ import type {
   AssetDTO,
   AssetQuery,
   DataChanged,
+  EndpointQuery,
+  EndpointSummary,
   FileQuery,
   FindingDTO,
   FindingQuery,
@@ -30,6 +32,12 @@ const listFindings = (
   sdk: SDK,
   query: FindingQuery,
 ): Promise<Page<FindingDTO>> => scanner.listFindings(hunterSDK(sdk), query);
+const listEndpoints = (
+  sdk: SDK,
+  query: EndpointQuery,
+): Promise<Page<FindingDTO>> => scanner.listEndpoints(hunterSDK(sdk), query);
+const getEndpointSummary = (sdk: SDK): Promise<EndpointSummary> =>
+  scanner.getEndpointSummary(hunterSDK(sdk));
 const listFiles = (
   sdk: SDK,
   query: FileQuery,
@@ -91,6 +99,8 @@ const publishFinding = (sdk: SDK, fingerprint: string): Promise<void> =>
 export type API = DefineAPI<{
   getOverview: typeof getOverview;
   listFindings: typeof listFindings;
+  listEndpoints: typeof listEndpoints;
+  getEndpointSummary: typeof getEndpointSummary;
   listFiles: typeof listFiles;
   listAssets: typeof listAssets;
   listRules: typeof listRules;
@@ -122,6 +132,8 @@ export type BackendEvents = DefineEvents<{
 export function init(sdk: SDK<API, BackendEvents>) {
   sdk.api.register("getOverview", getOverview);
   sdk.api.register("listFindings", listFindings);
+  sdk.api.register("listEndpoints", listEndpoints);
+  sdk.api.register("getEndpointSummary", getEndpointSummary);
   sdk.api.register("listFiles", listFiles);
   sdk.api.register("listAssets", listAssets);
   sdk.api.register("listRules", listRules);
@@ -159,6 +171,12 @@ export type {
   Confidence,
   DataArea,
   DataChanged,
+  EndpointMetadata,
+  EndpointMethod,
+  EndpointQuery,
+  EndpointScope,
+  EndpointSource,
+  EndpointSummary,
   FileQuery,
   FindingDTO,
   FindingKind,

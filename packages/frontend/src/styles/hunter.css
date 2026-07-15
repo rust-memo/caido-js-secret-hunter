@@ -236,6 +236,41 @@
 .format-mark.csv { color: #86efac; background: rgba(21, 128, 61, 0.17); }
 .hunter-notice { margin-top: 13px; padding: 11px 14px; border: 1px solid rgba(251, 191, 36, 0.22); border-radius: 9px; color: #d6c68c; background: rgba(146, 64, 14, 0.08); font-size: 10px; }
 
+.endpoint-page { background: radial-gradient(circle at 92% 6%, rgba(37, 99, 235, 0.07), transparent 28%); }
+.endpoint-heading { margin-bottom: 13px; }
+.endpoint-heading p { max-width: 720px; }
+.endpoint-method-mix { max-width: 440px; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
+.endpoint-method-mix > span { display: inline-flex; align-items: center; gap: 5px; color: var(--hunter-muted); font-size: 9px; }
+.endpoint-metrics { display: grid; grid-template-columns: repeat(5, minmax(135px, 1fr)); gap: 9px; margin-bottom: 12px; }
+.endpoint-metrics article { position: relative; min-height: 88px; display: flex; flex-direction: column; padding: 12px 13px; border: 1px solid var(--hunter-border); border-radius: 10px; background: linear-gradient(145deg, rgba(59, 130, 246, 0.045), transparent 58%), var(--hunter-surface); overflow: hidden; }
+.endpoint-metrics article::after { position: absolute; right: -18px; bottom: -28px; width: 70px; height: 70px; border: 1px solid rgba(96, 165, 250, 0.07); border-radius: 50%; content: ""; }
+.endpoint-metrics span { color: var(--hunter-muted); font-size: 8px; font-weight: 750; text-transform: uppercase; letter-spacing: 0.055em; }
+.endpoint-metrics strong { margin-top: 7px; color: #bfdbfe; font-size: 23px; letter-spacing: -0.04em; }
+.endpoint-metrics small { margin-top: auto; color: var(--hunter-faint); font-size: 8px; }
+.endpoint-filterbar { padding: 8px; border: 1px solid var(--hunter-border); border-radius: 10px; background: rgba(18, 23, 31, 0.7); }
+.endpoint-inventory-head { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 8px 11px; border-bottom: 1px solid var(--hunter-border); color: var(--hunter-faint); font-size: 9px; }
+.endpoint-inventory-head strong { color: var(--hunter-text); }
+.endpoint-method { min-width: 48px; display: inline-flex; align-items: center; justify-content: center; padding: 4px 6px; border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 6px; color: #cbd5e1; background: rgba(100, 116, 139, 0.11); font-size: 8px; font-weight: 850; letter-spacing: 0.045em; }
+.method-GET { border-color: rgba(74, 222, 128, 0.26); color: #bbf7d0; background: rgba(22, 163, 74, 0.12); }
+.method-POST { border-color: rgba(96, 165, 250, 0.28); color: #bfdbfe; background: rgba(37, 99, 235, 0.13); }
+.method-PUT, .method-PATCH { border-color: rgba(250, 204, 21, 0.27); color: #fef08a; background: rgba(161, 98, 7, 0.13); }
+.method-DELETE { border-color: rgba(251, 113, 133, 0.3); color: #fecdd3; background: rgba(190, 18, 60, 0.15); }
+.method-CONNECT { border-color: rgba(192, 132, 252, 0.3); color: #e9d5ff; background: rgba(126, 34, 206, 0.13); }
+.endpoint-canonical { max-width: 480px; color: #7f91a8 !important; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.endpoint-parameter-list { max-width: 250px; display: flex; flex-wrap: wrap; gap: 4px; }
+.endpoint-parameter-list span { max-width: 130px; padding: 3px 5px; border: 1px solid rgba(96, 165, 250, 0.18); border-radius: 5px; color: #bfdbfe; background: rgba(30, 64, 175, 0.1); font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; }
+.endpoint-scope { display: inline-flex; margin-bottom: 2px; padding: 3px 6px; border-radius: 999px; color: var(--hunter-muted); background: rgba(100, 116, 139, 0.12); font-size: 8px; font-weight: 700; }
+.scope-SAME_ORIGIN { color: #bbf7d0; background: rgba(22, 163, 74, 0.12); }
+.scope-CROSS_ORIGIN { color: #fed7aa; background: rgba(194, 65, 12, 0.14); }
+.scope-NON_HTTP { color: #ddd6fe; background: rgba(109, 40, 217, 0.13); }
+.endpoint-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.endpoint-detail-card { display: flex; flex-direction: column; gap: 9px; padding: 10px; border: 1px solid rgba(96, 165, 250, 0.18); border-radius: 8px; background: linear-gradient(145deg, rgba(37, 99, 235, 0.08), transparent 65%), #10151c; }
+.endpoint-detail-heading { display: flex; align-items: center; gap: 9px; }
+.endpoint-detail-heading > div { display: flex; flex-direction: column; gap: 2px; }
+.endpoint-detail-heading strong { color: var(--hunter-text); font-size: 10px; }
+.endpoint-detail-heading small { color: var(--hunter-muted); font-size: 8px; }
+.endpoint-detail-pattern { padding: 7px; border: 1px solid var(--hunter-border-soft); border-radius: 6px; color: #bfdbfe; background: rgba(14, 17, 23, 0.38); font: 9px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+
 .hunter-settings-layout { display: grid; grid-template-columns: minmax(450px, 1fr) minmax(280px, 0.42fr); gap: 14px; max-width: 1120px; }
 .hunter-settings-card { padding: 18px; border: 1px solid var(--hunter-border); border-radius: 12px; background: var(--hunter-surface); }
 .hunter-settings-card.network-card { background: linear-gradient(135deg, rgba(59, 130, 246, 0.045), transparent 50%), var(--hunter-surface); }
@@ -269,6 +304,7 @@
   .hunter-dashboard-grid, .hunter-report-hero, .hunter-settings-layout { grid-template-columns: 1fr; }
   .hunter-rule-grid { grid-template-columns: repeat(2, minmax(210px, 1fr)); }
   .hunter-workspace.detailed { grid-template-columns: minmax(0, 1fr) minmax(320px, 0.8fr); }
+  .endpoint-metrics { grid-template-columns: repeat(3, minmax(135px, 1fr)); }
 }
 
 @media (max-width: 850px) {
@@ -282,6 +318,8 @@
   .hunter-rule-grid { grid-template-columns: 1fr; }
   .hunter-editor-grid { grid-template-columns: 1fr; flex-basis: auto; }
   .hunter-filterbar > * { flex: 1 1 160px; }
+  .endpoint-method-mix { justify-content: flex-start; }
+  .endpoint-metrics { grid-template-columns: repeat(2, minmax(135px, 1fr)); }
 }
 
 @media (max-width: 560px) {
@@ -290,4 +328,6 @@
   .hunter-page-heading { gap: 12px; }
   .hunter-settings-layout { display: block; }
   .hunter-settings-sidebar { margin-top: 14px; }
+  .endpoint-metrics { grid-template-columns: 1fr; }
+  .endpoint-inventory-head { align-items: flex-start; flex-direction: column; }
 }

@@ -2,6 +2,31 @@
 
 All notable changes to this project are documented here.
 
+## 1.2.0 - 2026-07-16
+
+### Added
+
+- Endpoint call-site intelligence for Fetch, Axios, XHR, jQuery, router handlers, markup, WebSockets, and EventSource, including inferred HTTP methods.
+- Endpoint scope, parameter, dynamic-route, and canonical-pattern metadata with a database migration that preserves existing project findings and review state.
+- A redesigned Endpoint Intelligence inventory with route metrics, method/origin filters, canonical patterns, parameter chips, copy actions, and direct review handoff.
+- LinkFinder-style generic slash-relative route coverage with import, package, MIME, and static-resource noise filtering.
+- Content sniffing for extensionless JavaScript and common text formats served with missing or generic Content-Type metadata.
+- Dedicated regression coverage for response classification, endpoint extraction, metadata storage, and v2-to-v3 database migration.
+
+### Changed
+
+- Expanded the detector pack to 43 rules with API-documentation and health/metrics route coverage.
+- JSON reports now use schema version 2 and HTML/CSV/JSON exports include endpoint method and context metadata.
+- Sensitive configuration rules can mask stored values explicitly; Sentry DSNs now use this protection.
+- Major Node type, ESLint, and TypeScript Dependabot updates are held for deliberate compatibility upgrades.
+
+### Fixed
+
+- Fixed stale async list and source-message responses overwriting newer selections or filters across Findings, Files, Assets, Rules, and Endpoints views.
+- Fixed valid text and JavaScript responses being skipped when servers return generic or missing Content-Type metadata.
+- Fixed endpoint user-info and signed query values leaking into stored presentation or reports.
+- Fixed clipboard failures surfacing as unhandled UI errors.
+
 ## 1.1.0 - 2026-07-16
 
 ### Added

@@ -7,6 +7,11 @@ import type {
   AssetStatus,
   Confidence,
   DetectedFinding,
+  EndpointMethod,
+  EndpointQuery,
+  EndpointScope,
+  EndpointSource,
+  EndpointSummary,
   FileQuery,
   FindingDTO,
   FindingKind,
@@ -52,6 +57,12 @@ type FindingRow = {
   review_note: string;
   published: number;
   created_at: string;
+  endpoint_method: string;
+  endpoint_source: string;
+  endpoint_scope: string;
+  endpoint_parameters: string;
+  endpoint_dynamic: number;
+  endpoint_canonical: string;
 };
 
 type AssetRow = {
@@ -118,6 +129,12 @@ export class HunterStore {
         status TEXT NOT NULL DEFAULT 'NEEDS_REVIEW',
         published INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
+        endpoint_method TEXT NOT NULL DEFAULT '',
+        endpoint_source TEXT NOT NULL DEFAULT '',
+        endpoint_scope TEXT NOT NULL DEFAULT '',
+        endpoint_parameters TEXT NOT NULL DEFAULT '[]',
+        endpoint_dynamic INTEGER NOT NULL DEFAULT 0,
+        endpoint_canonical TEXT NOT NULL DEFAULT '',
         PRIMARY KEY (project_id, fingerprint)
       );
       CREATE INDEX IF NOT EXISTS findings_project_asset ON findings(project_id, asset_url);
@@ -165,10 +182,9 @@ export class HunterStore {
         key TEXT PRIMARY KEY,
         version INTEGER NOT NULL
       );
-      INSERT OR IGNORE INTO hunter_schema(key, version) VALUES('js-secret-hunter', 2);
-      UPDATE hunter_schema SET version = 2
-        WHERE key = 'js-secret-hunter' AND version < 2;
+      INSERT OR IGNORE INTO hunter_schema(key, version) VALUES('js-secret-hunter', 3);
     `);
+    await this.migrateEndpointMetadata();
   }
 
   async getSettings(): Promise<HunterSettings> {
@@ -317,6 +333,113 @@ export class HunterStore {
     return page(rows.map(toFinding), count?.count ?? 0, query);
   }
 
+  async listEndpoints(
+    projectId: string,
+    value: EndpointQuery,
+  ): Promise<Page<FindingDTO>> {
+    const query = normalizeEndpointQuery(value);
+    const where = ["findings.project_id = ?", "findings.kind = 'ENDPOINT'"];
+    const parameters: Parameter[] = [projectId];
+    if (query.confidence !== "ALL") {
+      where.push("findings.confidence = ?");
+      parameters.push(query.confidence);
+    }
+    if (query.status !== "ALL") {
+      where.push("findings.status = ?");
+      parameters.push(query.status);
+    }
+    if (query.method !== "ALL") {
+      where.push("COALESCE(NULLIF(findings.endpoint_method, ''), 'ANY') = ?");
+      parameters.push(query.method);
+    }
+    if (query.scope !== "ALL") {
+      where.push(
+        "COALESCE(NULLIF(findings.endpoint_scope, ''), 'UNKNOWN') = ?",
+      );
+      parameters.push(query.scope);
+    }
+    if (query.search !== "") {
+      where.push(`instr(lower(
+        findings.rule_name || ' ' || findings.rule_id || ' ' || findings.asset_url || ' ' ||
+        findings.masked_value || ' ' || findings.endpoint_canonical || ' ' ||
+        findings.endpoint_parameters || ' ' || findings.endpoint_method || ' ' ||
+        findings.endpoint_source || ' ' || findings.endpoint_scope || ' ' ||
+        COALESCE(finding_notes.note, '')
+      ), ?) > 0`);
+      parameters.push(query.search);
+    }
+    const clause = where.join(" AND ");
+    const database = this.requireDatabase();
+    // eslint-disable-next-line compat/compat -- Caido's async plugin runtime supports Promise.all.
+    const [rows, count] = await Promise.all([
+      database
+        .prepare(
+          `${FINDING_SELECT}
+          WHERE ${clause}
+          ORDER BY findings.created_at DESC
+          LIMIT ? OFFSET ?`,
+        )
+        .then((statement) =>
+          statement.all<FindingRow>(...parameters, query.limit, query.offset),
+        ),
+      database
+        .prepare(`SELECT COUNT(*) AS count ${FINDING_JOIN} WHERE ${clause}`)
+        .then((statement) => statement.get<{ count: number }>(...parameters)),
+    ]);
+    return page(rows.map(toFinding), count?.count ?? 0, query);
+  }
+
+  async endpointSummary(projectId: string): Promise<EndpointSummary> {
+    const database = this.requireDatabase();
+    // eslint-disable-next-line compat/compat -- Caido's async plugin runtime supports Promise.all.
+    const [statistics, methodRows, sourceRows] = await Promise.all([
+      database
+        .prepare(
+          `SELECT COUNT(*) AS observations,
+            COUNT(DISTINCT COALESCE(NULLIF(endpoint_method, ''), 'ANY') || char(10) ||
+              COALESCE(NULLIF(endpoint_canonical, ''), masked_value)) AS unique_routes,
+            COALESCE(SUM(CASE WHEN endpoint_dynamic = 1 THEN 1 ELSE 0 END), 0) AS dynamic_routes,
+            COALESCE(SUM(CASE WHEN endpoint_scope = 'CROSS_ORIGIN' THEN 1 ELSE 0 END), 0) AS cross_origin,
+            COALESCE(SUM(CASE WHEN endpoint_parameters <> '[]' THEN 1 ELSE 0 END), 0) AS parameterized
+          FROM findings WHERE project_id = ? AND kind = 'ENDPOINT'`,
+        )
+        .then((statement) =>
+          statement.get<{
+            observations: number;
+            unique_routes: number;
+            dynamic_routes: number;
+            cross_origin: number;
+            parameterized: number;
+          }>(projectId),
+        ),
+      database
+        .prepare(
+          `SELECT COALESCE(NULLIF(endpoint_method, ''), 'ANY') AS value, COUNT(*) AS count
+          FROM findings WHERE project_id = ? AND kind = 'ENDPOINT' GROUP BY value`,
+        )
+        .then((statement) =>
+          statement.all<{ value: string; count: number }>(projectId),
+        ),
+      database
+        .prepare(
+          `SELECT COALESCE(NULLIF(endpoint_source, ''), 'DETECTOR') AS value, COUNT(*) AS count
+          FROM findings WHERE project_id = ? AND kind = 'ENDPOINT' GROUP BY value`,
+        )
+        .then((statement) =>
+          statement.all<{ value: string; count: number }>(projectId),
+        ),
+    ]);
+    return {
+      observations: statistics?.observations ?? 0,
+      uniqueRoutes: statistics?.unique_routes ?? 0,
+      dynamicRoutes: statistics?.dynamic_routes ?? 0,
+      crossOrigin: statistics?.cross_origin ?? 0,
+      parameterized: statistics?.parameterized ?? 0,
+      methods: endpointCounts(methodRows, isEndpointMethod),
+      sources: endpointCounts(sourceRows, isEndpointSource),
+    };
+  }
+
   async listFiles(
     projectId: string,
     value: FileQuery,
@@ -436,8 +559,9 @@ export class HunterStore {
       INSERT OR IGNORE INTO findings(
         project_id, fingerprint, request_id, response_id, value_hash, rule_id, rule_name, kind,
         severity, confidence, asset_url, line, start_offset, end_offset, preview, masked_value,
-        status, published, created_at
-      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?
+        endpoint_method, endpoint_source, endpoint_scope, endpoint_parameters, endpoint_dynamic,
+        endpoint_canonical, status, published, created_at
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?
         WHERE (SELECT COUNT(*) FROM findings WHERE project_id = ?) < ?
     `);
     let added = 0;
@@ -468,6 +592,12 @@ export class HunterStore {
         finding.end,
         finding.preview,
         finding.maskedValue,
+        finding.endpoint?.method ?? "",
+        finding.endpoint?.source ?? "",
+        finding.endpoint?.scope ?? "",
+        JSON.stringify(finding.endpoint?.parameters ?? []),
+        finding.endpoint?.dynamic === true ? 1 : 0,
+        finding.endpoint?.canonical ?? "",
         review?.status ?? "NEEDS_REVIEW",
         new Date().toISOString(),
         projectId,
@@ -645,6 +775,33 @@ export class HunterStore {
       .then((statement) => statement.run(projectId, fingerprint));
   }
 
+  private async migrateEndpointMetadata(): Promise<void> {
+    const database = this.requireDatabase();
+    const columns = await database
+      .prepare("PRAGMA table_info(findings)")
+      .then((statement) => statement.all<{ name: string }>());
+    const existing = new Set(columns.map((column) => column.name));
+    const additions = [
+      ["endpoint_method", "TEXT NOT NULL DEFAULT ''"],
+      ["endpoint_source", "TEXT NOT NULL DEFAULT ''"],
+      ["endpoint_scope", "TEXT NOT NULL DEFAULT ''"],
+      ["endpoint_parameters", "TEXT NOT NULL DEFAULT '[]'"],
+      ["endpoint_dynamic", "INTEGER NOT NULL DEFAULT 0"],
+      ["endpoint_canonical", "TEXT NOT NULL DEFAULT ''"],
+    ] as const;
+    for (const [name, definition] of additions)
+      if (!existing.has(name))
+        await database.exec(
+          `ALTER TABLE findings ADD COLUMN ${name} ${definition}`,
+        );
+    await database.exec(`
+      CREATE INDEX IF NOT EXISTS findings_endpoint_inventory
+        ON findings(project_id, kind, endpoint_method, endpoint_scope, endpoint_canonical);
+      UPDATE hunter_schema SET version = 3
+        WHERE key = 'js-secret-hunter' AND version < 3;
+    `);
+  }
+
   private requireDatabase(): Database {
     if (this.database === undefined)
       throw new Error("JS Secret Hunter database is not initialized");
@@ -659,6 +816,17 @@ export function normalizeFindingQuery(value: FindingQuery): FindingQuery {
     confidence: isConfidence(value.confidence) ? value.confidence : "ALL",
     kind: isKind(value.kind) ? value.kind : "ALL",
     status: isReviewFilter(value.status) ? value.status : "ALL",
+    ...normalizePage(value),
+  };
+}
+
+export function normalizeEndpointQuery(value: EndpointQuery): EndpointQuery {
+  return {
+    search: normalizeSearch(value.search),
+    confidence: isConfidence(value.confidence) ? value.confidence : "ALL",
+    status: isReviewFilter(value.status) ? value.status : "ALL",
+    method: isEndpointMethodFilter(value.method) ? value.method : "ALL",
+    scope: isEndpointScopeFilter(value.scope) ? value.scope : "ALL",
     ...normalizePage(value),
   };
 }
@@ -748,6 +916,23 @@ function toFinding(row: FindingRow): FindingDTO {
     end: row.end_offset,
     preview: row.preview,
     maskedValue: row.masked_value,
+    endpoint:
+      row.kind === "ENDPOINT"
+        ? {
+            method: isEndpointMethod(row.endpoint_method)
+              ? row.endpoint_method
+              : "ANY",
+            source: isEndpointSource(row.endpoint_source)
+              ? row.endpoint_source
+              : "DETECTOR",
+            scope: isEndpointScope(row.endpoint_scope)
+              ? row.endpoint_scope
+              : "UNKNOWN",
+            parameters: parseParameters(row.endpoint_parameters),
+            dynamic: row.endpoint_dynamic === 1,
+            canonical: row.endpoint_canonical || row.masked_value,
+          }
+        : undefined,
     status: row.status,
     reviewNote: row.review_note,
     published: row.published === 1,
@@ -808,6 +993,50 @@ function isConfidence(value: FindingQuery["confidence"]): boolean {
   return ["ALL", "HIGH", "MEDIUM", "LOW"].includes(value);
 }
 
+function isEndpointMethod(value: string): value is EndpointMethod {
+  return [
+    "ANY",
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "HEAD",
+    "OPTIONS",
+    "CONNECT",
+  ].includes(value);
+}
+
+function isEndpointMethodFilter(
+  value: EndpointQuery["method"],
+): value is EndpointQuery["method"] {
+  return value === "ALL" || isEndpointMethod(value);
+}
+
+function isEndpointScope(value: string): value is EndpointScope {
+  return ["SAME_ORIGIN", "CROSS_ORIGIN", "NON_HTTP", "UNKNOWN"].includes(value);
+}
+
+function isEndpointScopeFilter(
+  value: EndpointQuery["scope"],
+): value is EndpointQuery["scope"] {
+  return value === "ALL" || isEndpointScope(value);
+}
+
+function isEndpointSource(value: string): value is EndpointSource {
+  return [
+    "DETECTOR",
+    "LITERAL",
+    "FETCH",
+    "AXIOS",
+    "XHR",
+    "JQUERY",
+    "ROUTER",
+    "MARKUP",
+    "WEBSOCKET",
+  ].includes(value);
+}
+
 function isKind(value: FindingQuery["kind"]): boolean {
   return [
     "ALL",
@@ -837,6 +1066,30 @@ function isAssetFilter(value: AssetQuery["status"]): boolean {
     "FAILED",
     "CANCELLED",
   ].includes(value);
+}
+
+function parseParameters(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => clip(item, 80))
+          .slice(0, 32)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function endpointCounts<T extends string>(
+  rows: Array<{ value: string; count: number }>,
+  accepted: (value: string) => value is T,
+): Partial<Record<T, number>> {
+  const output: Record<string, number> = {};
+  for (const row of rows)
+    if (accepted(row.value)) output[row.value] = row.count;
+  return output as Partial<Record<T, number>>;
 }
 
 function hostOf(url: string): string {

@@ -7,7 +7,7 @@ import PaginationControls from "@/components/PaginationControls.vue";
 import SeverityBadge from "@/components/SeverityBadge.vue";
 import { useConfirm } from "@/plugins/confirm";
 import { useSDK } from "@/plugins/sdk";
-import { safeMessage } from "@/utils";
+import { createRequestGate, safeMessage } from "@/utils";
 
 const { revision } = defineProps<{ revision: number }>();
 const emit = defineEmits<{ refresh: [] }>();
@@ -27,6 +27,8 @@ const requestHost = ref<HTMLElement>();
 const responseHost = ref<HTMLElement>();
 const requestEditor = sdk.ui.httpRequestEditor();
 const responseEditor = sdk.ui.httpResponseEditor();
+const listGate = createRequestGate();
+const messageGate = createRequestGate();
 let timer: number | undefined;
 
 type HttpEditor = {
@@ -40,6 +42,8 @@ onMounted(async () => {
 onUpdated(mountEditors);
 onUnmounted(() => {
   if (timer !== undefined) window.clearTimeout(timer);
+  listGate.invalidate();
+  messageGate.invalidate();
 });
 watch(search, () => scheduleLoad(0));
 watch(
@@ -56,38 +60,47 @@ function scheduleLoad(offset: number) {
 }
 
 async function load(offset: number) {
+  const request = listGate.start();
   loading.value = true;
   try {
-    page.value = await sdk.backend.listFiles({
+    const nextPage = await sdk.backend.listFiles({
       search: search.value,
       offset,
       limit: page.value.limit,
     });
+    if (!listGate.isCurrent(request)) return;
+    page.value = nextPage;
     if (
       selected.value !== undefined &&
       !page.value.items.some(
         (item) => item.assetUrl === selected.value?.assetUrl,
       )
-    )
+    ) {
       selected.value = undefined;
+      messageGate.invalidate();
+    }
   } catch (cause) {
-    sdk.window.showToast(safeMessage(cause), { variant: "error" });
+    if (listGate.isCurrent(request))
+      sdk.window.showToast(safeMessage(cause), { variant: "error" });
   } finally {
-    loading.value = false;
+    if (listGate.isCurrent(request)) loading.value = false;
   }
 }
 
 async function selectFile(file: SensitiveFileDTO) {
   selected.value = file;
+  const request = messageGate.start();
   try {
     const message = await sdk.backend.getMessage(file.requestId);
+    if (!messageGate.isCurrent(request)) return;
     setEditor(requestEditor, message?.request ?? "Source request unavailable.");
     setEditor(
       responseEditor,
       message?.response ?? "Source response unavailable.",
     );
   } catch (cause) {
-    sdk.window.showToast(safeMessage(cause), { variant: "error" });
+    if (messageGate.isCurrent(request))
+      sdk.window.showToast(safeMessage(cause), { variant: "error" });
   }
 }
 
@@ -146,8 +159,12 @@ async function replay() {
 
 async function copyUrl() {
   if (selected.value === undefined) return;
-  await navigator.clipboard.writeText(selected.value.assetUrl);
-  sdk.window.showToast("File URL copied.", { variant: "success" });
+  try {
+    await navigator.clipboard.writeText(selected.value.assetUrl);
+    sdk.window.showToast("File URL copied.", { variant: "success" });
+  } catch (cause) {
+    sdk.window.showToast(safeMessage(cause), { variant: "error" });
+  }
 }
 
 async function run(action: () => Promise<unknown>, success: string) {

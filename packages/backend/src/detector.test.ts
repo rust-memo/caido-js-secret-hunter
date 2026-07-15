@@ -6,8 +6,8 @@ import { decodeEscapes, rulePack, scanText, shannonEntropy } from "./detector";
 
 describe("Caido JS Secret Hunter detector", () => {
   it("loads and compiles every bundled rule", () => {
-    expect(rulePack.rules).toHaveLength(41);
-    expect(rulePack.version).toBe("2026.07.3");
+    expect(rulePack.rules).toHaveLength(43);
+    expect(rulePack.version).toBe("2026.07.4");
   });
 
   it("detects provider tokens and masks the stored presentation", () => {
@@ -89,7 +89,7 @@ describe("Caido JS Secret Hunter detector", () => {
         "https://app.test/legacy/search.php?q=test",
         "https://app.test/services/users.action",
         "https://api.example.test/catalog",
-        "/users/{param}/profile",
+        "https://app.test/users/{userId}/profile",
       ]),
     );
     expect(links.some((finding) => finding.rawValue.includes("logo.svg"))).toBe(
@@ -100,14 +100,22 @@ describe("Caido JS Secret Hunter detector", () => {
     ).toBe(false);
   });
 
-  it("prefers a specific endpoint rule over a generic link duplicate", () => {
+  it("keeps call-site context when a specific rule replaces a generic duplicate", () => {
     const findings = scanText(
-      'const users = "/api/v2/users";',
+      'fetch("/api/v2/users", { method: "PATCH" });',
       "https://app.test/app.js",
     );
-    expect(findings.some((finding) => finding.ruleId === "api-endpoint")).toBe(
-      true,
+    const endpoint = findings.find(
+      (finding) => finding.ruleId === "api-endpoint",
     );
+    expect(endpoint).toMatchObject({
+      maskedValue: "https://app.test/api/v2/users",
+      endpoint: {
+        method: "PATCH",
+        source: "FETCH",
+        scope: "SAME_ORIGIN",
+      },
+    });
     expect(
       findings.some(
         (finding) => finding.ruleId === "javascript-link-reference",
@@ -142,6 +150,16 @@ describe("Caido JS Secret Hunter detector", () => {
     expect(endpoint?.preview).not.toContain("supersecretvalue");
   });
 
+  it("redacts signed endpoint parameters from stored previews", () => {
+    const signature = "0123456789abcdef0123456789abcdef";
+    const finding = scanText(
+      `const endpoint = "/download?X-Amz-Signature=${signature}";`,
+      "https://app.test/app.js",
+    ).find((candidate) => candidate.kind === "ENDPOINT");
+    expect(finding?.maskedValue).toContain("X-Amz-Signature=[REDACTED]");
+    expect(finding?.preview).not.toContain(signature);
+  });
+
   it("reports the source line for decoded values", () => {
     const encoded = Buffer.from("wss://internal.local/socket").toString(
       "base64",
@@ -153,5 +171,90 @@ describe("Caido JS Secret Hunter detector", () => {
     expect(
       findings.find((finding) => finding.ruleId === "websocket-endpoint")?.line,
     ).toBe(3);
+  });
+
+  it("adds method, source, parameter, scope, and canonical route context", () => {
+    const findings = scanText(
+      [
+        'fetch(`/orders/${orderId}?expand=items`, { method: "POST" });',
+        'axios.delete("https://api.example.test/users/123456?token=secret&verbose=true");',
+      ].join("\n"),
+      "https://app.test/assets/app.js",
+    );
+    const post = findings.find(
+      (finding) => finding.endpoint?.method === "POST",
+    );
+    expect(post).toMatchObject({
+      maskedValue: "https://app.test/orders/{orderId}?expand=items",
+      confidence: "HIGH",
+      endpoint: {
+        method: "POST",
+        source: "FETCH",
+        scope: "SAME_ORIGIN",
+        parameters: ["expand", "orderId"],
+        dynamic: true,
+        canonical: "https://app.test/orders/{orderId}?expand",
+      },
+    });
+    const external = findings.find(
+      (finding) => finding.endpoint?.source === "AXIOS",
+    );
+    expect(external?.maskedValue).toContain("token=[REDACTED]");
+    expect(external?.endpoint).toMatchObject({
+      method: "DELETE",
+      scope: "CROSS_ORIGIN",
+      canonical: "https://api.example.test/users/{id}?token&verbose",
+    });
+  });
+
+  it("covers generic slash-relative LinkFinder routes but ignores imports", () => {
+    const findings = scanText(
+      [
+        'const report = "reports/export";',
+        'const profile = "customers/profile";',
+        'import runtime from "react/jsx-runtime";',
+        'const module = require("company/shared-utils");',
+      ].join("\n"),
+      "https://app.test/assets/app.js",
+    );
+    const links = findings.filter(
+      (finding) => finding.ruleId === "javascript-link-reference",
+    );
+    expect(links.map((finding) => finding.maskedValue)).toEqual(
+      expect.arrayContaining([
+        "https://app.test/assets/reports/export",
+        "https://app.test/assets/customers/profile",
+      ]),
+    );
+    expect(links.some((finding) => finding.rawValue.includes("runtime"))).toBe(
+      false,
+    );
+    expect(
+      links.some((finding) => finding.rawValue.includes("shared-utils")),
+    ).toBe(false);
+  });
+
+  it("detects documentation and health endpoints", () => {
+    const findings = scanText(
+      'const docs = "/openapi.json"; const health = "/healthz";',
+      "https://app.test/app.js",
+    );
+    expect(
+      findings.some((finding) => finding.ruleId === "api-documentation-route"),
+    ).toBe(true);
+    expect(
+      findings.some((finding) => finding.ruleId === "health-metrics-route"),
+    ).toBe(true);
+  });
+
+  it("masks sensitive configuration values before persistence", () => {
+    const dsn =
+      "https://0123456789abcdef0123456789abcdef@o1.ingest.sentry.io/42";
+    const finding = scanText(
+      `window.SENTRY_DSN = "${dsn}";`,
+      "https://app.test/app.js",
+    ).find((candidate) => candidate.ruleId === "sentry-dsn");
+    expect(finding?.maskedValue).toBe("http…o/42");
+    expect(finding?.preview).not.toContain(dsn);
   });
 });

@@ -24,9 +24,9 @@ describe("redacted reports", () => {
   it("exports structured JSON without raw values", () => {
     const file = buildReport("json", data(), "2026-07-15T10:00:00.000Z");
     expect(JSON.parse(file.content)).toMatchObject({
-      schemaVersion: 1,
-      version: "1.1.0",
-      generator: "Caido JS Secret Hunter 1.1.0",
+      schemaVersion: 2,
+      version: "1.2.0",
+      generator: "Caido JS Secret Hunter 1.2.0",
       summary: { findings: 1, critical: 1, endpoints: 0 },
     });
     expect(file.content).not.toContain("raw-secret-value");
@@ -37,6 +37,33 @@ describe("redacted reports", () => {
     const value = data();
     value.findings[0]!.reviewNote = '=HYPERLINK("https://evil.test")';
     expect(buildReport("csv", value).content).toContain("'=HYPERLINK");
+  });
+
+  it("exports endpoint inventory context in every report format", () => {
+    const value = data();
+    const finding = value.findings[0]!;
+    finding.kind = "ENDPOINT";
+    finding.endpoint = {
+      method: "PATCH",
+      source: "FETCH",
+      scope: "SAME_ORIGIN",
+      parameters: ["userId"],
+      dynamic: true,
+      canonical: "https://app.test/users/{userId}",
+    };
+    const json = JSON.parse(buildReport("json", value).content) as {
+      summary: { endpoints: number; uniqueEndpoints: number };
+      findings: Array<{ endpoint: { method: string; source: string } }>;
+    };
+    expect(json.summary).toMatchObject({ endpoints: 1, uniqueEndpoints: 1 });
+    expect(json.findings[0]?.endpoint).toMatchObject({
+      method: "PATCH",
+      source: "FETCH",
+    });
+    expect(buildReport("html", value).content).toContain(">PATCH<");
+    expect(buildReport("csv", value).content).toContain(
+      '"Method","Endpoint source","Endpoint scope","Endpoint parameters"',
+    );
   });
 });
 

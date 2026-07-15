@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   HunterStore,
   normalizeAssetQuery,
+  normalizeEndpointQuery,
   normalizeFileQuery,
   normalizeFindingQuery,
 } from "./store";
@@ -51,6 +52,25 @@ describe("HunterStore", () => {
       status: "SCANNED",
       offset: 1_000_000,
       limit: 50,
+    });
+    expect(
+      normalizeEndpointQuery({
+        search: "  ORDER  ",
+        confidence: "HIGH",
+        status: "ALL",
+        method: "POST",
+        scope: "CROSS_ORIGIN",
+        offset: -1,
+        limit: 500,
+      }),
+    ).toEqual({
+      search: "order",
+      confidence: "HIGH",
+      status: "ALL",
+      method: "POST",
+      scope: "CROSS_ORIGIN",
+      offset: 0,
+      limit: 100,
     });
   });
 
@@ -139,6 +159,32 @@ describe("HunterStore", () => {
     });
     expect(assets.total).toBe(1);
 
+    const endpoints = await store.listEndpoints("project-1", {
+      search: "orderid",
+      confidence: "ALL",
+      status: "ALL",
+      method: "POST",
+      scope: "CROSS_ORIGIN",
+      offset: 0,
+      limit: 50,
+    });
+    expect(endpoints.total).toBe(1);
+    expect(endpoints.items[0]?.endpoint).toMatchObject({
+      method: "POST",
+      source: "FETCH",
+      scope: "CROSS_ORIGIN",
+      parameters: ["orderId"],
+    });
+    expect(await store.endpointSummary("project-1")).toMatchObject({
+      observations: 1,
+      uniqueRoutes: 1,
+      dynamicRoutes: 1,
+      crossOrigin: 1,
+      parameterized: 1,
+      methods: { POST: 1 },
+      sources: { FETCH: 1 },
+    });
+
     const overview = await store.overview("project-1");
     expect(overview.summary).toMatchObject({
       findingTotal: 2,
@@ -167,7 +213,7 @@ describe("HunterStore", () => {
       raw
         .prepare("SELECT version FROM hunter_schema WHERE key = ?")
         .get("js-secret-hunter"),
-    ).toMatchObject({ version: 2 });
+    ).toMatchObject({ version: 3 });
     raw.close();
   });
 
@@ -192,6 +238,75 @@ describe("HunterStore", () => {
       ),
     ]);
     expect(await store.findingCount("project-1")).toBe(1);
+    raw.close();
+  });
+
+  it("upgrades a v2 findings table without discarding existing rows", async () => {
+    const raw = new DatabaseSync(":memory:");
+    raw.exec(`
+      CREATE TABLE findings (
+        project_id TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        response_id TEXT NOT NULL,
+        value_hash TEXT NOT NULL,
+        rule_id TEXT NOT NULL,
+        rule_name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        confidence TEXT NOT NULL,
+        asset_url TEXT NOT NULL,
+        line INTEGER NOT NULL,
+        start_offset INTEGER NOT NULL,
+        end_offset INTEGER NOT NULL,
+        preview TEXT NOT NULL,
+        masked_value TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'NEEDS_REVIEW',
+        published INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (project_id, fingerprint)
+      );
+      INSERT INTO findings VALUES(
+        'project-1', 'old-fingerprint', 'request-1', 'response-1', '${"a".repeat(64)}',
+        'api-endpoint', 'API endpoint', 'ENDPOINT', 'INFO', 'MEDIUM',
+        'https://app.test/app.js', 1, 0, 5, 'preview', '/api/v1/users',
+        'NEEDS_REVIEW', 0, '2026-07-16T00:00:00.000Z'
+      );
+      CREATE TABLE hunter_schema (key TEXT PRIMARY KEY, version INTEGER NOT NULL);
+      INSERT INTO hunter_schema VALUES('js-secret-hunter', 2);
+    `);
+    const store = new HunterStore();
+    await store.initialize(sdk(asyncDatabase(raw)));
+    expect(
+      raw
+        .prepare("SELECT version FROM hunter_schema WHERE key = ?")
+        .get("js-secret-hunter"),
+    ).toMatchObject({ version: 3 });
+    expect(
+      raw
+        .prepare("PRAGMA table_info(findings)")
+        .all()
+        .map((column) => (column as { name: string }).name),
+    ).toEqual(
+      expect.arrayContaining([
+        "endpoint_method",
+        "endpoint_source",
+        "endpoint_scope",
+        "endpoint_parameters",
+        "endpoint_dynamic",
+        "endpoint_canonical",
+      ]),
+    );
+    expect(
+      await store.getFinding("project-1", "old-fingerprint"),
+    ).toMatchObject({
+      endpoint: {
+        method: "ANY",
+        source: "DETECTOR",
+        scope: "UNKNOWN",
+        parameters: [],
+      },
+    });
     raw.close();
   });
 
@@ -245,6 +360,17 @@ function finding(
     preview: `token=${suffix}`,
     maskedValue: `${suffix.slice(0, 2)}…`,
     rawValue: `secret-${suffix}`,
+    endpoint:
+      kind === "ENDPOINT"
+        ? {
+            method: "POST",
+            source: "FETCH",
+            scope: "CROSS_ORIGIN",
+            parameters: ["orderId"],
+            dynamic: true,
+            canonical: "https://api.test/orders/{orderId}",
+          }
+        : undefined,
   };
 }
 

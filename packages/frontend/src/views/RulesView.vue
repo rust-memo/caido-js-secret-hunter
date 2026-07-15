@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import type { RuleSummary } from "backend";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 import SeverityBadge from "@/components/SeverityBadge.vue";
 import { useConfirm } from "@/plugins/confirm";
 import { useSDK } from "@/plugins/sdk";
-import { safeMessage, statusLabel } from "@/utils";
+import { createRequestGate, safeMessage, statusLabel } from "@/utils";
 
 const { revision, ignoredHosts } = defineProps<{
   revision: number;
@@ -18,6 +18,7 @@ const rules = ref<RuleSummary[]>([]);
 const search = ref("");
 const kind = ref("ALL");
 const loading = ref(false);
+const requestGate = createRequestGate();
 
 const filtered = computed(() => {
   const query = search.value.trim().toLowerCase();
@@ -32,19 +33,23 @@ const filtered = computed(() => {
 });
 
 onMounted(load);
+onUnmounted(requestGate.invalidate);
 watch(
   () => revision,
   () => void load(),
 );
 
 async function load() {
+  const request = requestGate.start();
   loading.value = true;
   try {
-    rules.value = await sdk.backend.listRules();
+    const nextRules = await sdk.backend.listRules();
+    if (requestGate.isCurrent(request)) rules.value = nextRules;
   } catch (cause) {
-    sdk.window.showToast(safeMessage(cause), { variant: "error" });
+    if (requestGate.isCurrent(request))
+      sdk.window.showToast(safeMessage(cause), { variant: "error" });
   } finally {
-    loading.value = false;
+    if (requestGate.isCurrent(request)) loading.value = false;
   }
 }
 

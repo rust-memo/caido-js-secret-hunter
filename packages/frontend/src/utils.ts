@@ -26,6 +26,24 @@ export function formatDate(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
+export function createRequestGate(): {
+  start: () => number;
+  isCurrent: (request: number) => boolean;
+  invalidate: () => void;
+} {
+  let current = 0;
+  return {
+    start: () => {
+      current += 1;
+      return current;
+    },
+    isCurrent: (request) => request === current,
+    invalidate: () => {
+      current += 1;
+    },
+  };
+}
+
 export function downloadReport(file: {
   filename: string;
   mediaType: string;

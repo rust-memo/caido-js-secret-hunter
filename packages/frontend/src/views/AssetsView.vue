@@ -4,7 +4,12 @@ import { onMounted, onUnmounted, ref, watch } from "vue";
 
 import PaginationControls from "@/components/PaginationControls.vue";
 import { useSDK } from "@/plugins/sdk";
-import { formatDate, safeMessage, statusLabel } from "@/utils";
+import {
+  createRequestGate,
+  formatDate,
+  safeMessage,
+  statusLabel,
+} from "@/utils";
 
 const { revision } = defineProps<{ revision: number }>();
 const sdk = useSDK();
@@ -12,11 +17,13 @@ const page = ref<Page<AssetDTO>>({ items: [], total: 0, offset: 0, limit: 50 });
 const search = ref("");
 const status = ref<AssetQuery["status"]>("ALL");
 const loading = ref(false);
+const requestGate = createRequestGate();
 let timer: number | undefined;
 
 onMounted(() => load(0));
 onUnmounted(() => {
   if (timer !== undefined) window.clearTimeout(timer);
+  requestGate.invalidate();
 });
 watch([search, status], () => scheduleLoad(0));
 watch(
@@ -33,18 +40,21 @@ function scheduleLoad(offset: number) {
 }
 
 async function load(offset: number) {
+  const request = requestGate.start();
   loading.value = true;
   try {
-    page.value = await sdk.backend.listAssets({
+    const nextPage = await sdk.backend.listAssets({
       search: search.value,
       status: status.value,
       offset,
       limit: page.value.limit,
     });
+    if (requestGate.isCurrent(request)) page.value = nextPage;
   } catch (cause) {
-    sdk.window.showToast(safeMessage(cause), { variant: "error" });
+    if (requestGate.isCurrent(request))
+      sdk.window.showToast(safeMessage(cause), { variant: "error" });
   } finally {
-    loading.value = false;
+    if (requestGate.isCurrent(request)) loading.value = false;
   }
 }
 </script>
