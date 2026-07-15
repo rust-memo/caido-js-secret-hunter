@@ -25,15 +25,15 @@
   "devDependencies": {
     "@caido-community/dev": "^0.1.7",
     "@caido/eslint-config": "0.10.0",
-    "@types/node": "22.20.1",
+    "@types/node": "26.1.1",
     "@vitejs/plugin-vue": "6.0.8",
     "@vitest/coverage-v8": "4.1.10",
     "@vue/test-utils": "2.4.11",
-    "eslint": "9.39.5",
+    "eslint": "10.7.0",
     "happy-dom": "20.10.6",
-    "knip": "6.26.0",
+    "knip": "6.27.0",
     "postcss-prefixwrap": "1.58.0",
-    "typescript": "6.0.3",
+    "typescript": "7.0.2",
     "vitest": "4.1.10",
     "vue": "3.5.39"
   }
