@@ -25,8 +25,8 @@ describe("redacted reports", () => {
     const file = buildReport("json", data(), "2026-07-15T10:00:00.000Z");
     expect(JSON.parse(file.content)).toMatchObject({
       schemaVersion: 2,
-      version: "1.2.1",
-      generator: "Caido JS Secret Hunter 1.2.1",
+      version: "1.2.2",
+      generator: "Caido JS Secret Hunter 1.2.2",
       summary: { findings: 1, critical: 1, endpoints: 0 },
     });
     expect(file.content).not.toContain("raw-secret-value");
@@ -87,6 +87,7 @@ function data(): ReportData {
         end: 20,
         preview: "<script> token=[REDACTED]",
         maskedValue: "ghp_…1234",
+        evidenceHighlight: "[REDACTED]",
         status: "REVIEWED",
         reviewNote: "rotated",
         published: true,

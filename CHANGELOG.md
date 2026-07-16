@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here.
 
+## 1.2.2 - 2026-07-16
+
+### Added
+
+- Highlighted the exact masked match inside redacted evidence without persisting or injecting the raw secret into the UI.
+- Selected and scrolled to source-aligned matches inside the Caido response viewer; decoded and Base64 findings continue to use the safe redacted-evidence highlight.
+
+### Fixed
+
+- Fixed **Clear results** and **Rebuild results** failing with `database is locked` after `BEGIN IMMEDIATE` was executed on Caido's pooled SQLite connections.
+- Replaced connection-scoped transaction commands with a single atomic checkpoint statement backed by SQLite triggers, so findings and assets are deleted together on one pool connection.
+- Added a schema-v5 migration and a connection-pool regression test covering both checkpointed clear and full rebuild clear paths.
+
 ## 1.2.1 - 2026-07-16
 
 ### Fixed

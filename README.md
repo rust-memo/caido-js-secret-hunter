@@ -14,6 +14,7 @@ Professional background discovery and triage of secrets, credentials, endpoints,
 - Provides dedicated Dashboard, Findings, Sensitive Files, Assets, Rules, Reports, and Settings workspaces.
 - Uses server-side search, filters, sorting, pagination, and bounded queues so large projects do not send the full dataset to the UI.
 - Supports bulk triage, persistent review notes, reversible rule/host exclusions, Replay handoff, and deduplicated redacted Caido Findings.
+- Highlights the detected masked value in redacted evidence and scrolls source-aligned matches into view in the original response.
 - Exports sanitized HTML, JSON, and CSV reports. CSV cells are protected against spreadsheet-formula injection.
 - Can analyze one saved Caido Request ID without clearing existing project results.
 
@@ -79,11 +80,11 @@ The installable package is generated at `dist/plugin_package.zip`. Contribution 
 
 ## العربية
 
-الإضافة تفحص استجابات **HTTP History** القديمة والجديدة في الخلفية، ثم تعرض النتائج في واجهة احترافية تشمل لوحة ملخص، والنتائج، والملفات الحساسة، والأصول، والقواعد، والتقارير، والإعدادات. مساحة **Endpoint Intelligence** تعرض الآن نوع الطلب، ومصدر الاستدعاء، والنطاق، والباراميترات، والمسارات الديناميكية مع فلاتر وإحصاءات مستقلة.
+الإضافة تفحص استجابات **HTTP History** القديمة والجديدة في الخلفية، ثم تعرض النتائج في واجهة احترافية تشمل لوحة ملخص، والنتائج، والملفات الحساسة، والأصول، والقواعد، والتقارير، والإعدادات. مساحة **Endpoint Intelligence** تعرض الآن نوع الطلب، ومصدر الاستدعاء، والنطاق، والباراميترات، والمسارات الديناميكية مع فلاتر وإحصاءات مستقلة. عند فتح نتيجة يتم تمييز الجزء المكتشف داخل الدليل المنقّح، كما تنتقل استجابة المصدر تلقائيًا إلى التطابق عندما تكون إحداثيات النص الأصلية متاحة.
 
 القيم السرية الخام لا تُحفظ؛ يتم الاحتفاظ بقيمة مخفية وبصمة SHA-256 ومعاينة منقّحة فقط. جلب ملفات JavaScript تلقائيًا متوقف افتراضيًا، وأي طلب يتم تفعيله يجب أن يبقى داخل **Caido Scope**. تمرير `Cookie` أو `Authorization` يحتاج موافقة منفصلة ولا يعمل إلا لنفس المصدر تمامًا.
 
-حفظ الإعدادات لا يمسح النتائج. عند استخدام **Clear results** تبقى النتائج القديمة محذوفة حتى بعد إعادة تحميل الإضافة أو تغيير المشروع، ولا تعود إلا عند تشغيل **Scan History** أو **Rebuild results** صراحةً. الاستجابات الجديدة تظل قابلة للتحليل. راجع كل نتيجة يدويًا قبل اعتبارها تسريبًا مؤكدًا.
+حفظ الإعدادات لا يمسح النتائج. عند استخدام **Clear results** تبقى النتائج القديمة محذوفة حتى بعد إعادة تحميل الإضافة أو تغيير المشروع، ولا تعود إلا عند تشغيل **Scan History** أو **Rebuild results** صراحةً. تم إصلاح خطأ `database is locked` في الإصدار 1.2.2. الاستجابات الجديدة تظل قابلة للتحليل. راجع كل نتيجة يدويًا قبل اعتبارها تسريبًا مؤكدًا.
 
 ## License
 

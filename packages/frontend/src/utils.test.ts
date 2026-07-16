@@ -6,7 +6,9 @@ import {
   correctedPageOffset,
   createRequestGate,
   formatDate,
+  highlightSegments,
   hostOf,
+  responseBodyRange,
   safeMessage,
   statusClass,
   statusLabel,
@@ -56,5 +58,33 @@ describe("frontend utilities", () => {
     expect(
       correctedPageOffset({ items: [{}], total: 51, offset: 50, limit: 50 }),
     ).toBeUndefined();
+  });
+
+  it("splits detected evidence for safe text-only highlighting", () => {
+    expect(
+      highlightSegments(
+        'source | api_key="ghp_…6789"; backup="ghp_…6789"',
+        "ghp_…6789",
+      ),
+    ).toEqual([
+      { text: 'source | api_key="', highlighted: false },
+      { text: "ghp_…6789", highlighted: true },
+      { text: '"; backup="', highlighted: false },
+      { text: "ghp_…6789", highlighted: true },
+      { text: '"', highlighted: false },
+    ]);
+    expect(highlightSegments("<script>", "missing")).toEqual([
+      { text: "<script>", highlighted: false },
+    ]);
+  });
+
+  it("maps source-aligned findings into raw HTTP response coordinates", () => {
+    const response =
+      "HTTP/1.1 200 OK\r\nContent-Type: text/javascript\r\n\r\nkey=secret";
+    const range = responseBodyRange(response, 4, 10, true);
+    expect(range).toBeDefined();
+    expect(response.slice(range!.from, range!.to)).toBe("secret");
+    expect(responseBodyRange(response, 4, 10, false)).toBeUndefined();
+    expect(responseBodyRange(response, 1000, 2000, true)).toBeUndefined();
   });
 });

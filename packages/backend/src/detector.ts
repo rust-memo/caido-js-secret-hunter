@@ -108,6 +108,7 @@ function scanLinkReferences(
         reference.raw,
       )}`,
       maskedValue: reference.presentation,
+      evidenceHighlight: mask(reference.raw),
       rawValue: reference.value,
       endpoint: reference.metadata,
     });
@@ -229,6 +230,7 @@ function scanRule(
         (rule.definition.sensitiveValue === true
           ? mask(value)
           : maskForKind(value, rule.definition.kind)),
+      evidenceHighlight: mask(value),
       rawValue: value,
       endpoint: endpoint?.metadata,
     });

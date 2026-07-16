@@ -53,6 +53,7 @@ type FindingRow = {
   end_offset: number;
   preview: string;
   masked_value: string;
+  evidence_highlight: string;
   status: ReviewStatus;
   review_note: string;
   published: number;
@@ -126,6 +127,7 @@ export class HunterStore {
         end_offset INTEGER NOT NULL,
         preview TEXT NOT NULL,
         masked_value TEXT NOT NULL,
+        evidence_highlight TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'NEEDS_REVIEW',
         published INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
@@ -186,7 +188,7 @@ export class HunterStore {
         project_id TEXT PRIMARY KEY,
         history_cutoff TEXT NOT NULL
       );
-      INSERT OR IGNORE INTO hunter_schema(key, version) VALUES('js-secret-hunter', 4);
+      INSERT OR IGNORE INTO hunter_schema(key, version) VALUES('js-secret-hunter', 5);
     `);
     await this.migrateSchema();
   }
@@ -563,9 +565,9 @@ export class HunterStore {
       INSERT OR IGNORE INTO findings(
         project_id, fingerprint, request_id, response_id, value_hash, rule_id, rule_name, kind,
         severity, confidence, asset_url, line, start_offset, end_offset, preview, masked_value,
-        endpoint_method, endpoint_source, endpoint_scope, endpoint_parameters, endpoint_dynamic,
-        endpoint_canonical, status, published, created_at
-      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?
+        evidence_highlight, endpoint_method, endpoint_source, endpoint_scope, endpoint_parameters,
+        endpoint_dynamic, endpoint_canonical, status, published, created_at
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?
         WHERE (SELECT COUNT(*) FROM findings WHERE project_id = ?) < ?
     `);
     let added = 0;
@@ -596,6 +598,7 @@ export class HunterStore {
         finding.end,
         finding.preview,
         finding.maskedValue,
+        finding.evidenceHighlight,
         finding.endpoint?.method ?? "",
         finding.endpoint?.source ?? "",
         finding.endpoint?.scope ?? "",
@@ -703,31 +706,15 @@ export class HunterStore {
     historyCutoff = new Date().toISOString(),
   ): Promise<void> {
     const database = this.requireDatabase();
-    await database.exec("BEGIN IMMEDIATE");
-    try {
-      await database
-        .prepare("DELETE FROM findings WHERE project_id = ?")
-        .then((statement) => statement.run(projectId));
-      await database
-        .prepare("DELETE FROM assets WHERE project_id = ?")
-        .then((statement) => statement.run(projectId));
-      if (historyCutoff === "") {
-        await database
-          .prepare("DELETE FROM project_state WHERE project_id = ?")
-          .then((statement) => statement.run(projectId));
-      } else {
-        await database
-          .prepare(
-            `INSERT INTO project_state(project_id, history_cutoff) VALUES(?, ?)
-            ON CONFLICT(project_id) DO UPDATE SET history_cutoff = excluded.history_cutoff`,
-          )
-          .then((statement) => statement.run(projectId, historyCutoff));
-      }
-      await database.exec("COMMIT");
-    } catch (error) {
-      await database.exec("ROLLBACK").catch(() => undefined);
-      throw error;
-    }
+    const checkpoint =
+      historyCutoff === "" ? new Date().toISOString() : historyCutoff;
+    await database
+      .prepare(
+        `INSERT INTO project_state(project_id, history_cutoff) VALUES(?, ?)
+        ON CONFLICT(project_id) DO UPDATE SET history_cutoff = excluded.history_cutoff`,
+      )
+      .then((statement) => statement.run(projectId, checkpoint));
+    if (historyCutoff === "") await this.resetHistoryCutoff(projectId);
   }
 
   async ignore(
@@ -829,6 +816,7 @@ export class HunterStore {
       .then((statement) => statement.all<{ name: string }>());
     const existing = new Set(columns.map((column) => column.name));
     const additions = [
+      ["evidence_highlight", "TEXT NOT NULL DEFAULT ''"],
       ["endpoint_method", "TEXT NOT NULL DEFAULT ''"],
       ["endpoint_source", "TEXT NOT NULL DEFAULT ''"],
       ["endpoint_scope", "TEXT NOT NULL DEFAULT ''"],
@@ -846,10 +834,22 @@ export class HunterStore {
         project_id TEXT PRIMARY KEY,
         history_cutoff TEXT NOT NULL
       );
+      CREATE TRIGGER IF NOT EXISTS hunter_clear_results_after_state_insert
+      AFTER INSERT ON project_state
+      BEGIN
+        DELETE FROM findings WHERE project_id = NEW.project_id;
+        DELETE FROM assets WHERE project_id = NEW.project_id;
+      END;
+      CREATE TRIGGER IF NOT EXISTS hunter_clear_results_after_state_update
+      AFTER UPDATE OF history_cutoff ON project_state
+      BEGIN
+        DELETE FROM findings WHERE project_id = NEW.project_id;
+        DELETE FROM assets WHERE project_id = NEW.project_id;
+      END;
       CREATE INDEX IF NOT EXISTS findings_endpoint_inventory
         ON findings(project_id, kind, endpoint_method, endpoint_scope, endpoint_canonical);
-      UPDATE hunter_schema SET version = 4
-        WHERE key = 'js-secret-hunter' AND version < 4;
+      UPDATE hunter_schema SET version = 5
+        WHERE key = 'js-secret-hunter' AND version < 5;
     `);
   }
 
@@ -967,6 +967,9 @@ function toFinding(row: FindingRow): FindingDTO {
     end: row.end_offset,
     preview: row.preview,
     maskedValue: row.masked_value,
+    evidenceHighlight:
+      row.evidence_highlight ||
+      inferEvidenceHighlight(row.preview, row.masked_value),
     endpoint:
       row.kind === "ENDPOINT"
         ? {
@@ -1003,6 +1006,17 @@ function toAsset(row: AssetRow): AssetDTO {
     detail: row.detail,
     updatedAt: row.updated_at,
   };
+}
+
+function inferEvidenceHighlight(preview: string, maskedValue: string): string {
+  if (maskedValue !== "" && preview.includes(maskedValue)) return maskedValue;
+  const context = preview.split(" | ").slice(1).join(" | ") || preview;
+  const redacted = context.match(/\[REDACTED(?:_[A-Z]+)?\]/)?.[0];
+  if (redacted !== undefined) return redacted;
+  return (
+    context.match(/[^\s"'`=,;()[\]{}]{1,24}…[^\s"'`=,;()[\]{}]{1,24}/)?.[0] ??
+    ""
+  );
 }
 
 function toFile(row: FileRow): SensitiveFileDTO {
