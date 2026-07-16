@@ -82,6 +82,7 @@ export type DetectedFinding = {
   end: number;
   preview: string;
   maskedValue: string;
+  evidenceHighlight: string;
   rawValue: string;
   endpoint?: EndpointMetadata;
 };

@@ -1,5 +1,15 @@
 import type { ReviewStatus } from "backend";
 
+export type HighlightSegment = {
+  text: string;
+  highlighted: boolean;
+};
+
+export type TextRange = {
+  from: number;
+  to: number;
+};
+
 export function safeMessage(value: unknown): string {
   return value instanceof Error ? value.message : String(value);
 }
@@ -55,6 +65,53 @@ export function correctedPageOffset(page: {
   const lastOffset = Math.floor((page.total - 1) / page.limit) * page.limit;
   if (page.offset >= page.total) return lastOffset;
   return page.offset > 0 ? 0 : undefined;
+}
+
+export function highlightSegments(
+  text: string,
+  highlight: string,
+): HighlightSegment[] {
+  if (text === "" || highlight === "" || !text.includes(highlight))
+    return [{ text, highlighted: false }];
+  const segments: HighlightSegment[] = [];
+  let offset = 0;
+  for (let index = text.indexOf(highlight, offset); index >= 0;) {
+    if (index > offset)
+      segments.push({ text: text.slice(offset, index), highlighted: false });
+    segments.push({ text: highlight, highlighted: true });
+    offset = index + highlight.length;
+    index = text.indexOf(highlight, offset);
+  }
+  if (offset < text.length)
+    segments.push({ text: text.slice(offset), highlighted: false });
+  return segments;
+}
+
+export function responseBodyRange(
+  response: string,
+  start: number,
+  end: number,
+  sourceAligned: boolean,
+): TextRange | undefined {
+  if (!sourceAligned || !Number.isFinite(start) || !Number.isFinite(end))
+    return undefined;
+  const windowsSeparator = response.indexOf("\r\n\r\n");
+  const unixSeparator = response.indexOf("\n\n");
+  const bodyOffset =
+    windowsSeparator >= 0
+      ? windowsSeparator + 4
+      : unixSeparator >= 0
+        ? unixSeparator + 2
+        : 0;
+  const from = Math.min(
+    response.length,
+    Math.max(bodyOffset, bodyOffset + Math.trunc(start)),
+  );
+  const to = Math.min(
+    response.length,
+    Math.max(from, bodyOffset + Math.trunc(end)),
+  );
+  return to > from ? { from, to } : undefined;
 }
 
 export function downloadReport(file: {

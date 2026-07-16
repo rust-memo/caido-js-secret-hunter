@@ -21,6 +21,8 @@ describe("Caido JS Secret Hunter detector", () => {
     );
     expect(finding?.rawValue).toBe(token);
     expect(finding?.maskedValue).toBe("ghp_…6789");
+    expect(finding?.evidenceHighlight).toBe("ghp_…6789");
+    expect(finding?.preview).toContain(finding!.evidenceHighlight);
     expect(finding?.valueHash).toMatch(/^[a-f0-9]{64}$/);
   });
 

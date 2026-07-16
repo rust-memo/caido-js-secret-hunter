@@ -192,6 +192,7 @@
 .hunter-value-box code { color: #fda4af; font-size: 11px; overflow-wrap: anywhere; }
 .hunter-value-box small { color: var(--hunter-faint); font: 8px/1.5 ui-monospace, monospace; overflow-wrap: anywhere; }
 .hunter-evidence-box pre { margin: 0; color: #cbd5e1; white-space: pre-wrap; overflow-wrap: anywhere; font: 9px/1.55 ui-monospace, monospace; }
+.hunter-evidence-box mark { padding: 1px 3px; border: 1px solid rgba(250, 204, 21, 0.4); border-radius: 4px; color: #fff7c2; background: rgba(202, 138, 4, 0.28); box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.06); }
 .secondary-actions { padding-top: 12px; border-top: 1px solid var(--hunter-border-soft); }
 .hunter-editor-stack { display: flex; flex-direction: column; gap: 9px; }
 .hunter-editor-grid { flex: 0 0 min(38vh, 360px); min-height: 210px; display: grid; grid-template-columns: 1fr 1fr; gap: 11px; margin-top: 11px; }

@@ -11,7 +11,9 @@ import {
   correctedPageOffset,
   createRequestGate,
   formatDate,
+  highlightSegments,
   hostOf,
+  responseBodyRange,
   safeMessage,
   statusClass,
   statusLabel,
@@ -58,6 +60,14 @@ const allSelected = computed(
     page.value.items.every((finding) =>
       selectedIds.value.has(finding.fingerprint),
     ),
+);
+const evidenceSegments = computed(() =>
+  selected.value === undefined
+    ? []
+    : highlightSegments(
+        selected.value.preview,
+        selected.value.evidenceHighlight,
+      ),
 );
 
 onMounted(async () => {
@@ -145,7 +155,7 @@ async function focusFinding(fingerprint: string | undefined) {
 
 async function selectFinding(finding: FindingDTO) {
   hydrateSelected(finding);
-  await loadMessage(finding.requestId);
+  await loadMessage(finding);
 }
 
 function hydrateSelected(finding: FindingDTO) {
@@ -172,10 +182,10 @@ function mountEditors() {
     responseHost.value.append(responseEditor.getElement());
 }
 
-async function loadMessage(requestId: string) {
+async function loadMessage(finding: FindingDTO) {
   const request = messageGate.start();
   try {
-    const message = await sdk.backend.getMessage(requestId);
+    const message = await sdk.backend.getMessage(finding.requestId);
     if (!messageGate.isCurrent(request)) return;
     setEditor(
       requestEditor,
@@ -184,6 +194,14 @@ async function loadMessage(requestId: string) {
     setEditor(
       responseEditor,
       message?.response ?? "Source response is no longer available in Caido.",
+      message === undefined
+        ? undefined
+        : responseBodyRange(
+            message.response,
+            finding.start,
+            finding.end,
+            finding.preview.startsWith("source | "),
+          ),
     );
   } catch (cause) {
     if (messageGate.isCurrent(request))
@@ -191,11 +209,20 @@ async function loadMessage(requestId: string) {
   }
 }
 
-function setEditor(editor: HttpEditor, value: string) {
+function setEditor(
+  editor: HttpEditor,
+  value: string,
+  selection?: { from: number; to: number },
+) {
   const view = editor.getEditorView();
   view.dispatch({
     changes: { from: 0, to: view.state.doc.length, insert: value },
   });
+  if (selection !== undefined)
+    view.dispatch({
+      selection: { anchor: selection.from, head: selection.to },
+      scrollIntoView: true,
+    });
 }
 
 async function run(action: () => Promise<unknown>, success: string) {
@@ -540,8 +567,13 @@ function togglePage() {
             </div>
           </div>
           <div class="hunter-evidence-box">
-            <span>Redacted evidence</span>
-            <pre>{{ selected.preview }}</pre>
+            <span>Redacted evidence · detected match highlighted</span>
+            <pre><template
+                v-for="(segment, index) in evidenceSegments"
+                :key="`${index}-${segment.highlighted}`"
+              ><mark v-if="segment.highlighted">{{ segment.text }}</mark><template
+                  v-else
+                >{{ segment.text }}</template></template></pre>
           </div>
           <label class="hunter-field">
             <span>Reviewer note</span>

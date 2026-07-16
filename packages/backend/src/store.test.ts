@@ -243,7 +243,7 @@ describe("HunterStore", () => {
       raw
         .prepare("SELECT version FROM hunter_schema WHERE key = ?")
         .get("js-secret-hunter"),
-    ).toMatchObject({ version: 4 });
+    ).toMatchObject({ version: 5 });
     raw.close();
   });
 
@@ -311,7 +311,7 @@ describe("HunterStore", () => {
       raw
         .prepare("SELECT version FROM hunter_schema WHERE key = ?")
         .get("js-secret-hunter"),
-    ).toMatchObject({ version: 4 });
+    ).toMatchObject({ version: 5 });
     expect(
       raw
         .prepare("PRAGMA table_info(findings)")
@@ -325,6 +325,7 @@ describe("HunterStore", () => {
         "endpoint_parameters",
         "endpoint_dynamic",
         "endpoint_canonical",
+        "evidence_highlight",
       ]),
     );
     expect(
@@ -337,6 +338,41 @@ describe("HunterStore", () => {
         parameters: [],
       },
     });
+    raw.close();
+  });
+
+  it("clears atomically without connection-scoped transaction commands", async () => {
+    const raw = new DatabaseSync(":memory:");
+    const store = new HunterStore();
+    await store.initialize(sdk(rejectTransactionControl(asyncDatabase(raw))));
+    await store.addFindings(
+      "project-1",
+      "request-1",
+      "response-1",
+      [finding("one", "HIGH", "https://app.test/app.js")],
+      10,
+    );
+    await store.upsertAsset(asset("https://app.test/app.js"));
+
+    await expect(
+      store.clearResults("project-1", "2026-07-16T08:30:00.000Z"),
+    ).resolves.toBeUndefined();
+    expect(await store.findingCount("project-1")).toBe(0);
+    expect(await store.assets("project-1")).toEqual([]);
+    expect(await store.getHistoryCutoff("project-1")).toBe(
+      "2026-07-16T08:30:00.000Z",
+    );
+
+    await store.addFindings(
+      "project-1",
+      "request-2",
+      "response-2",
+      [finding("two", "HIGH", "https://app.test/two.js")],
+      10,
+    );
+    await store.clearResults("project-1", "");
+    expect(await store.findingCount("project-1")).toBe(0);
+    expect(await store.getHistoryCutoff("project-1")).toBeUndefined();
     raw.close();
   });
 
@@ -389,6 +425,7 @@ function finding(
     end: 30,
     preview: `token=${suffix}`,
     maskedValue: `${suffix.slice(0, 2)}…`,
+    evidenceHighlight: suffix,
     rawValue: `secret-${suffix}`,
     endpoint:
       kind === "ENDPOINT"
@@ -441,5 +478,16 @@ function asyncDatabase(raw: DatabaseSync): Database {
         },
       });
     },
+  };
+}
+
+function rejectTransactionControl(database: Database): Database {
+  return {
+    exec: (sql: string) => {
+      if (/^(?:BEGIN(?: IMMEDIATE)?|COMMIT|ROLLBACK);?$/i.test(sql.trim()))
+        return Promise.reject(new Error("database is locked"));
+      return database.exec(sql);
+    },
+    prepare: (sql: string) => database.prepare(sql),
   };
 }
