@@ -31,7 +31,7 @@
     "@vue/test-utils": "2.4.11",
     "eslint": "9.39.5",
     "happy-dom": "20.10.6",
-    "knip": "6.26.0",
+    "knip": "6.27.0",
     "postcss-prefixwrap": "1.58.0",
     "typescript": "6.0.3",
     "vitest": "4.1.10",
