@@ -66,6 +66,17 @@ function togglePause() {
           Triage JavaScript, source maps, and text responses already captured by
           Caido. Candidates stay redacted until you validate them manually.
         </p>
+        <div
+          class="hunter-scope-status"
+          :class="{ warning: overview.settings.scanAllHistory }"
+        >
+          <span>{{ overview.settings.scanAllHistory ? "!" : "✓" }}</span>
+          {{
+            overview.settings.scanAllHistory
+              ? "All History coverage"
+              : "Caido Scope enforced"
+          }}
+        </div>
       </div>
       <div class="hunter-actions hero-actions">
         <button
@@ -190,7 +201,13 @@ function togglePause() {
           <div>
             <h3>Safe collection controls</h3>
             <p>
-              Automatic fetching is
+              History and live analysis use
+              <strong>{{
+                overview.settings.scanAllHistory
+                  ? "all captured traffic"
+                  : "Caido Scope only"
+              }}</strong
+              >. Automatic fetching is
               <strong>{{
                 overview.settings.autoFetch ? "enabled" : "off"
               }}</strong

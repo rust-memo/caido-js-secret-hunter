@@ -35,6 +35,7 @@ const summary = ref<EndpointSummary>({
   dynamicRoutes: 0,
   crossOrigin: 0,
   parameterized: 0,
+  highPrecision: 0,
   methods: {},
   sources: {},
 });
@@ -43,6 +44,7 @@ const confidence = ref<EndpointQuery["confidence"]>("ALL");
 const status = ref<EndpointQuery["status"]>("ALL");
 const method = ref<EndpointQuery["method"]>("ALL");
 const scope = ref<EndpointQuery["scope"]>("ALL");
+const minimumScore = ref<EndpointQuery["minimumScore"]>(0);
 const loading = ref(false);
 const requestGate = createRequestGate();
 let timer: number | undefined;
@@ -58,7 +60,9 @@ onUnmounted(() => {
   if (timer !== undefined) window.clearTimeout(timer);
   requestGate.invalidate();
 });
-watch([search, confidence, status, method, scope], () => scheduleLoad(0));
+watch([search, confidence, status, method, scope, minimumScore], () =>
+  scheduleLoad(0),
+);
 watch(
   () => revision,
   () => scheduleLoad(page.value.offset),
@@ -84,6 +88,7 @@ async function load(offset: number) {
         status: status.value,
         method: method.value,
         scope: scope.value,
+        minimumScore: minimumScore.value,
         offset,
         limit: page.value.limit,
       }),
@@ -167,6 +172,11 @@ function methodClass(value: EndpointMethod | undefined): string {
         <strong>{{ summary.parameterized }}</strong>
         <small>Query or route inputs</small>
       </article>
+      <article>
+        <span>High precision</span>
+        <strong>{{ summary.highPrecision }}</strong>
+        <small>Score 80 or higher</small>
+      </article>
     </div>
 
     <div class="hunter-filterbar endpoint-filterbar">
@@ -204,6 +214,16 @@ function methodClass(value: EndpointMethod | undefined): string {
         <option>HIGH</option>
         <option>MEDIUM</option>
         <option>LOW</option>
+      </select>
+      <select
+        v-model="minimumScore"
+        class="hunter-select"
+        aria-label="Minimum precision score"
+      >
+        <option :value="0">All precision</option>
+        <option :value="50">Precision 50+</option>
+        <option :value="70">Precision 70+</option>
+        <option :value="85">Precision 85+</option>
       </select>
       <select v-model="status" class="hunter-select" aria-label="Review status">
         <option value="ALL">All statuses</option>
@@ -284,9 +304,25 @@ function methodClass(value: EndpointMethod | undefined): string {
                 >
                   {{ statusLabel(finding.endpoint?.scope ?? "UNKNOWN") }}
                 </span>
+                <span
+                  class="endpoint-precision"
+                  :class="`precision-${
+                    (finding.endpoint?.precisionScore ?? 0) >= 80
+                      ? 'high'
+                      : (finding.endpoint?.precisionScore ?? 0) >= 60
+                        ? 'medium'
+                        : 'low'
+                  }`"
+                  :title="finding.endpoint?.signals.join(' · ')"
+                >
+                  {{ finding.endpoint?.precisionScore ?? 0 }} precision
+                </span>
                 <small>
                   {{ statusLabel(finding.endpoint?.source ?? "DETECTOR") }} ·
                   {{ statusLabel(finding.confidence) }} confidence
+                </small>
+                <small v-if="finding.endpoint?.signals.length">
+                  {{ finding.endpoint.signals.slice(0, 2).join(" · ") }}
                 </small>
               </td>
               <td class="url-cell" :title="finding.assetUrl">

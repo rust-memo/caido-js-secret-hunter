@@ -184,6 +184,8 @@ function scanRule(
     const raw = captured;
     const value = raw.trim();
     if (value.length < (rule.definition.minLength ?? 0)) continue;
+    if (rule.definition.confidence !== "HIGH" && isObviousPlaceholder(value))
+      continue;
     if (rule.allowlist !== undefined && rule.allowlist.test(value)) {
       rule.allowlist.lastIndex = 0;
       continue;
@@ -443,6 +445,29 @@ function redactUrlValue(value: string): string {
 function mask(value: string): string {
   if (value.length <= 8) return "[REDACTED]";
   return `${value.slice(0, 4)}…${value.slice(-4)}`;
+}
+
+function isObviousPlaceholder(value: string): boolean {
+  const normalized = value.trim();
+  if (
+    /^(?:\$\{[^}]+\}|\{\{[^}]+\}\}|<[^>]+>|%[A-Za-z0-9_]+%)$/.test(normalized)
+  )
+    return true;
+  if (
+    /(?:^|[\s._-])(?:dummy|example|fake|masked|mock|not[\s_-]*a[\s_-]*real|placeholder|redacted|sample)(?:$|[\s._-])/i.test(
+      normalized,
+    )
+  )
+    return true;
+  if (
+    /^(?:insert|replace|your)[_-]?(?:api[_-]?key|password|secret|token|value)(?:[_-]?here)?$/i.test(
+      normalized,
+    )
+  )
+    return true;
+  return /^(?:123456(?:78|789)?|letmein|p@ssw0rd|passw0rd|password|qwerty)(?:!|[0-9]{0,4})$/i.test(
+    normalized,
+  );
 }
 
 function sha256(value: string): string {

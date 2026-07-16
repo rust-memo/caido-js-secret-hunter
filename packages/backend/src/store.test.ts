@@ -60,6 +60,7 @@ describe("HunterStore", () => {
         status: "ALL",
         method: "POST",
         scope: "CROSS_ORIGIN",
+        minimumScore: 101,
         offset: -1,
         limit: 500,
       }),
@@ -69,6 +70,7 @@ describe("HunterStore", () => {
       status: "ALL",
       method: "POST",
       scope: "CROSS_ORIGIN",
+      minimumScore: 100,
       offset: 0,
       limit: 100,
     });
@@ -81,8 +83,15 @@ describe("HunterStore", () => {
     await store.initialize(sdk(database));
 
     expect(await store.getSettings()).toMatchObject({
+      scanAllHistory: false,
       autoFetch: false,
       includeCredentials: false,
+      assetExclusions: expect.arrayContaining([
+        "jquery",
+        "modernizr",
+        "gtm",
+        "fbevents",
+      ]),
     });
     const saved = await store.saveSettings({
       scanAllHistory: true,
@@ -165,6 +174,7 @@ describe("HunterStore", () => {
       status: "ALL",
       method: "POST",
       scope: "CROSS_ORIGIN",
+      minimumScore: 80,
       offset: 0,
       limit: 50,
     });
@@ -181,6 +191,7 @@ describe("HunterStore", () => {
       dynamicRoutes: 1,
       crossOrigin: 1,
       parameterized: 1,
+      highPrecision: 1,
       methods: { POST: 1 },
       sources: { FETCH: 1 },
     });
@@ -243,7 +254,28 @@ describe("HunterStore", () => {
       raw
         .prepare("SELECT version FROM hunter_schema WHERE key = ?")
         .get("js-secret-hunter"),
-    ).toMatchObject({ version: 5 });
+    ).toMatchObject({ version: 7 });
+    raw.close();
+  });
+
+  it("migrates legacy all-History defaults to scope-only coverage", async () => {
+    const raw = new DatabaseSync(":memory:");
+    raw.exec(`
+      CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE hunter_schema (key TEXT PRIMARY KEY, version INTEGER NOT NULL);
+      INSERT INTO hunter_schema(key, version) VALUES('js-secret-hunter', 6);
+      INSERT INTO settings(key, value) VALUES(
+        'hunter',
+        '{"scanAllHistory":true,"maxDepth":4}'
+      );
+    `);
+    const store = new HunterStore();
+    await store.initialize(sdk(asyncDatabase(raw)));
+
+    expect(await store.getSettings()).toMatchObject({
+      scanAllHistory: false,
+      maxDepth: 4,
+    });
     raw.close();
   });
 
@@ -311,7 +343,7 @@ describe("HunterStore", () => {
       raw
         .prepare("SELECT version FROM hunter_schema WHERE key = ?")
         .get("js-secret-hunter"),
-    ).toMatchObject({ version: 5 });
+    ).toMatchObject({ version: 7 });
     expect(
       raw
         .prepare("PRAGMA table_info(findings)")
@@ -325,6 +357,8 @@ describe("HunterStore", () => {
         "endpoint_parameters",
         "endpoint_dynamic",
         "endpoint_canonical",
+        "endpoint_score",
+        "endpoint_signals",
         "evidence_highlight",
       ]),
     );
@@ -336,7 +370,49 @@ describe("HunterStore", () => {
         source: "DETECTOR",
         scope: "UNKNOWN",
         parameters: [],
+        precisionScore: 70,
+        signals: ["Legacy observation; rebuild for full precision signals"],
       },
+    });
+    raw.close();
+  });
+
+  it("filters endpoint observations by explainable precision score", async () => {
+    const raw = new DatabaseSync(":memory:");
+    const store = new HunterStore();
+    await store.initialize(sdk(asyncDatabase(raw)));
+    const strong = finding(
+      "strong",
+      "MEDIUM",
+      "https://app.test/app.js",
+      "ENDPOINT",
+    );
+    const weak = finding("weak", "INFO", "https://app.test/app.js", "ENDPOINT");
+    weak.endpoint!.precisionScore = 48;
+    weak.endpoint!.signals = ["Document-relative route"];
+    await store.addFindings(
+      "project-1",
+      "request-1",
+      "response-1",
+      [strong, weak],
+      10,
+    );
+
+    expect(
+      await store.listEndpoints("project-1", {
+        search: "",
+        confidence: "ALL",
+        status: "ALL",
+        method: "ALL",
+        scope: "ALL",
+        minimumScore: 80,
+        offset: 0,
+        limit: 50,
+      }),
+    ).toMatchObject({ total: 1, items: [{ fingerprint: strong.fingerprint }] });
+    expect(await store.endpointSummary("project-1")).toMatchObject({
+      observations: 2,
+      highPrecision: 1,
     });
     raw.close();
   });
@@ -436,6 +512,8 @@ function finding(
             parameters: ["orderId"],
             dynamic: true,
             canonical: "https://api.test/orders/{orderId}",
+            precisionScore: 92,
+            signals: ["Fetch call-site", "Request parameters"],
           }
         : undefined,
   };

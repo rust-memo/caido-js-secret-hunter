@@ -104,8 +104,69 @@ describe("endpoint intelligence extraction", () => {
     expect(references).toHaveLength(1);
     expect(references[0]).toMatchObject({
       value: "customers/export",
-      confidence: "LOW",
+      confidence: "MEDIUM",
       presentation: "https://app.example.test/assets/customers/export",
+      metadata: {
+        precisionScore: 67,
+        signals: expect.arrayContaining([
+          "Application route vocabulary",
+          "REST-style resource",
+        ]),
+      },
+    });
+  });
+
+  it("suppresses dependency, localization, UI, and generated asset paths", () => {
+    const references = extractEndpointReferences(
+      [
+        'const locale = "en/messages";',
+        'const icon = "icons/home";',
+        'const chunk = "/assets/chunks/runtime";',
+        'const weakModule = "feature/module";',
+        'const lazy = import(/* webpackChunkName: "admin" */ "features/admin-panel");',
+        'const resolved = require.resolve("company/shared-helper");',
+        'jest.mock("client/testing-utils");',
+        'define(["vendor/plugin", "framework/runtime"], factory);',
+        'const customer = "customers/profile";',
+        'const endpointUrl = "billing/portal";',
+        'fetch("feature/module");',
+      ].join("\n"),
+      decode,
+      "https://app.example.test/assets/app.js",
+    );
+
+    expect(references.map((reference) => reference.value)).toEqual(
+      expect.arrayContaining([
+        "customers/profile",
+        "billing/portal",
+        "feature/module",
+      ]),
+    );
+    for (const noise of [
+      "en/messages",
+      "icons/home",
+      "/assets/chunks/runtime",
+      "features/admin-panel",
+      "company/shared-helper",
+      "client/testing-utils",
+      "vendor/plugin",
+      "framework/runtime",
+    ])
+      expect(references.some((reference) => reference.value === noise)).toBe(
+        false,
+      );
+    expect(
+      references.find(
+        (reference) =>
+          reference.value === "feature/module" &&
+          reference.metadata.source === "FETCH",
+      ),
+    ).toMatchObject({
+      confidence: "HIGH",
+      metadata: {
+        precisionScore: 100,
+        signals: expect.arrayContaining(["Fetch call-site"]),
+      },
     });
   });
 
@@ -115,5 +176,59 @@ describe("endpoint intelligence extraction", () => {
       describeEndpoint("wss://socket.example.test/events", "not a URL").metadata
         .scope,
     ).toBe("UNKNOWN");
+  });
+
+  it("holds precision on a mixed application and framework-noise corpus", () => {
+    const references = extractEndpointReferences(
+      [
+        'const api = "/api/v1/users";',
+        'const legacy = "../services/report.action?id=7";',
+        'const external = "https://api.example.test/catalog";',
+        'const graphql = "/graphql";',
+        'const profile = "users/profile";',
+        'const endpointUrl = "billing/portal";',
+        'const download = "/download.php?id=1";',
+        "const order = `/orders/${orderId}`;",
+        'router.delete("/accounts/:accountId");',
+        'fetch("feature/module");',
+        'import runtime from "react/jsx-runtime";',
+        'const lazy = import(/* webpackChunkName: "settings" */ "features/settings");',
+        'const locale = "en/messages";',
+        'const icon = "icons/home";',
+        'const chunk = "/assets/chunks/runtime";',
+        'const weak = "feature/module";',
+        'const mime = "text/html";',
+        'const imageMime = "image/svg+xml";',
+        'const logo = "/assets/logo.svg";',
+        'const selector = "div/span";',
+        'const theme = "theme/dark";',
+        'const vendor = "node_modules/library/runtime";',
+        'const generated = "/static/runtime";',
+        'const unsafe = "data:text/plain,hello";',
+      ].join("\n"),
+      decode,
+      "https://app.example.test/assets/app.js",
+    );
+    const values = references.map((reference) => reference.value);
+
+    expect(values).toEqual(
+      expect.arrayContaining([
+        "/api/v1/users",
+        "../services/report.action?id=7",
+        "https://api.example.test/catalog",
+        "/graphql",
+        "users/profile",
+        "billing/portal",
+        "/download.php?id=1",
+        "/orders/{orderId}",
+        "/accounts/:accountId",
+        "feature/module",
+      ]),
+    );
+    expect(references).toHaveLength(10);
+    expect(
+      references.filter((reference) => reference.metadata.precisionScore >= 80)
+        .length,
+    ).toBeGreaterThanOrEqual(6);
   });
 });

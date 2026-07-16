@@ -68,7 +68,7 @@ function exportable(data: ReportData, generatedAt: string) {
     (finding) => finding.status !== "FALSE_POSITIVE",
   );
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     version: PLUGIN_VERSION,
     generatedAt,
     generator: `Caido JS Secret Hunter ${PLUGIN_VERSION}`,
@@ -97,6 +97,11 @@ function exportable(data: ReportData, generatedAt: string) {
               `${finding.endpoint?.method ?? "ANY"} ${finding.endpoint?.canonical ?? finding.maskedValue}`,
           ),
       ).size,
+      highPrecisionEndpoints: data.findings.filter(
+        (finding) =>
+          finding.kind === "ENDPOINT" &&
+          (finding.endpoint?.precisionScore ?? 0) >= 80,
+      ).length,
       files: new Set(data.findings.map((finding) => finding.assetUrl)).size,
       assets: data.assets.length,
       enabledRules: data.rules.filter((rule) => rule.enabled !== false).length,
@@ -127,6 +132,8 @@ function exportable(data: ReportData, generatedAt: string) {
               parameters: finding.endpoint.parameters,
               dynamic: finding.endpoint.dynamic,
               canonical: redact(finding.endpoint.canonical),
+              precisionScore: finding.endpoint.precisionScore,
+              signals: finding.endpoint.signals.map(redact),
             },
     })),
     assets: data.assets.map((asset) => ({
@@ -155,7 +162,7 @@ function htmlReport(data: ReportData, generatedAt: string): string {
   const findings = report.findings
     .map(
       (finding) =>
-        `<tr><td>${escapeHtml(finding.severity)}</td><td>${escapeHtml(finding.status)}</td><td>${escapeHtml(finding.ruleName)}</td><td>${escapeHtml(finding.kind)}</td><td>${escapeHtml(finding.endpoint?.method ?? "")}</td><td>${escapeHtml(finding.maskedValue)}</td><td>${escapeHtml(finding.assetUrl)}</td><td>${finding.line}</td><td>${escapeHtml(`${finding.reviewNote}\n${finding.preview}`)}</td></tr>`,
+        `<tr><td>${escapeHtml(finding.severity)}</td><td>${escapeHtml(finding.status)}</td><td>${escapeHtml(finding.ruleName)}</td><td>${escapeHtml(finding.kind)}</td><td>${escapeHtml(finding.endpoint?.method ?? "")}</td><td>${finding.endpoint?.precisionScore ?? ""}</td><td>${escapeHtml(finding.endpoint?.signals.join(" · ") ?? "")}</td><td>${escapeHtml(finding.maskedValue)}</td><td>${escapeHtml(finding.assetUrl)}</td><td>${finding.line}</td><td>${escapeHtml(`${finding.reviewNote}\n${finding.preview}`)}</td></tr>`,
     )
     .join("");
   const rules = report.rules
@@ -164,7 +171,7 @@ function htmlReport(data: ReportData, generatedAt: string): string {
         `<tr><td>${escapeHtml(rule.id)}</td><td>${escapeHtml(rule.name)}</td><td>${escapeHtml(rule.kind)}</td><td>${escapeHtml(rule.severity)}</td><td>${rule.ignored ? "Ignored" : rule.enabled ? "Enabled" : "Disabled"}</td></tr>`,
     )
     .join("");
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Caido JS Secret Hunter Report</title><style>body{font:14px system-ui;margin:32px;color:#17202a}h1{color:#9f1239}table{border-collapse:collapse;width:100%;margin:16px 0 32px}th,td{border:1px solid #cbd5e1;padding:7px;text-align:left;vertical-align:top;white-space:pre-wrap}th{background:#1e293b;color:white}.notice{padding:12px;background:#fff7ed;border:1px solid #fdba74}.metrics{display:flex;gap:16px;flex-wrap:wrap;font-weight:600}</style></head><body><h1>Caido JS Secret Hunter Report</h1><p>Generated ${escapeHtml(generatedAt)} by Caido JS Secret Hunter ${escapeHtml(PLUGIN_VERSION)}.</p><p class="notice">Matches are review candidates, not proof that a credential is valid. Raw HTTP, request IDs, internal fingerprints, and raw values are excluded.</p><h2>Summary</h2><p class="metrics"><span>${report.summary.findings} findings</span><span>${report.summary.needsReview} need review</span><span>${report.summary.critical} critical</span><span>${report.summary.high} high</span><span>${report.summary.endpoints} endpoint observations</span><span>${report.summary.uniqueEndpoints} unique routes</span><span>${report.summary.files} sensitive files</span><span>${report.summary.assets} assets</span></p><h2>Findings</h2><table><thead><tr><th>Severity</th><th>Status</th><th>Rule</th><th>Kind</th><th>Method</th><th>Masked value</th><th>Asset</th><th>Line</th><th>Review evidence</th></tr></thead><tbody>${findings}</tbody></table><h2>Rule library</h2><table><thead><tr><th>ID</th><th>Name</th><th>Kind</th><th>Severity</th><th>State</th></tr></thead><tbody>${rules}</tbody></table></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Caido JS Secret Hunter Report</title><style>body{font:14px system-ui;margin:32px;color:#17202a}h1{color:#9f1239}table{border-collapse:collapse;width:100%;margin:16px 0 32px}th,td{border:1px solid #cbd5e1;padding:7px;text-align:left;vertical-align:top;white-space:pre-wrap}th{background:#1e293b;color:white}.notice{padding:12px;background:#fff7ed;border:1px solid #fdba74}.metrics{display:flex;gap:16px;flex-wrap:wrap;font-weight:600}</style></head><body><h1>Caido JS Secret Hunter Report</h1><p>Generated ${escapeHtml(generatedAt)} by Caido JS Secret Hunter ${escapeHtml(PLUGIN_VERSION)}.</p><p class="notice">Matches are review candidates, not proof that a credential is valid. Raw HTTP, request IDs, internal fingerprints, and raw values are excluded.</p><h2>Summary</h2><p class="metrics"><span>${report.summary.findings} findings</span><span>${report.summary.needsReview} need review</span><span>${report.summary.critical} critical</span><span>${report.summary.high} high</span><span>${report.summary.endpoints} endpoint observations</span><span>${report.summary.uniqueEndpoints} unique routes</span><span>${report.summary.highPrecisionEndpoints} high-precision endpoints</span><span>${report.summary.files} sensitive files</span><span>${report.summary.assets} assets</span></p><h2>Findings</h2><table><thead><tr><th>Severity</th><th>Status</th><th>Rule</th><th>Kind</th><th>Method</th><th>Precision</th><th>Precision signals</th><th>Masked value</th><th>Asset</th><th>Line</th><th>Review evidence</th></tr></thead><tbody>${findings}</tbody></table><h2>Rule library</h2><table><thead><tr><th>ID</th><th>Name</th><th>Kind</th><th>Severity</th><th>State</th></tr></thead><tbody>${rules}</tbody></table></body></html>`;
 }
 
 function csvReport(findings: FindingDTO[]): string {
@@ -178,6 +185,8 @@ function csvReport(findings: FindingDTO[]): string {
     "Endpoint source",
     "Endpoint scope",
     "Endpoint parameters",
+    "Endpoint precision",
+    "Endpoint signals",
     "Masked value",
     "Asset URL",
     "Line",
@@ -196,6 +205,8 @@ function csvReport(findings: FindingDTO[]): string {
     finding.endpoint?.source ?? "",
     finding.endpoint?.scope ?? "",
     finding.endpoint?.parameters.join(" ") ?? "",
+    finding.endpoint?.precisionScore ?? "",
+    finding.endpoint?.signals.join(" | ") ?? "",
     redact(finding.maskedValue),
     redact(finding.assetUrl),
     finding.line,

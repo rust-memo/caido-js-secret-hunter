@@ -24,9 +24,9 @@ describe("redacted reports", () => {
   it("exports structured JSON without raw values", () => {
     const file = buildReport("json", data(), "2026-07-15T10:00:00.000Z");
     expect(JSON.parse(file.content)).toMatchObject({
-      schemaVersion: 2,
-      version: "1.2.2",
-      generator: "Caido JS Secret Hunter 1.2.2",
+      schemaVersion: 3,
+      version: "1.3.0",
+      generator: "Caido JS Secret Hunter 1.3.0",
       summary: { findings: 1, critical: 1, endpoints: 0 },
     });
     expect(file.content).not.toContain("raw-secret-value");
@@ -50,19 +50,38 @@ describe("redacted reports", () => {
       parameters: ["userId"],
       dynamic: true,
       canonical: "https://app.test/users/{userId}",
+      precisionScore: 94,
+      signals: ["Fetch call-site", "Dynamic route template"],
     };
     const json = JSON.parse(buildReport("json", value).content) as {
-      summary: { endpoints: number; uniqueEndpoints: number };
-      findings: Array<{ endpoint: { method: string; source: string } }>;
+      summary: {
+        endpoints: number;
+        uniqueEndpoints: number;
+        highPrecisionEndpoints: number;
+      };
+      findings: Array<{
+        endpoint: { method: string; source: string; precisionScore: number };
+      }>;
     };
-    expect(json.summary).toMatchObject({ endpoints: 1, uniqueEndpoints: 1 });
+    expect(json.summary).toMatchObject({
+      endpoints: 1,
+      uniqueEndpoints: 1,
+      highPrecisionEndpoints: 1,
+    });
     expect(json.findings[0]?.endpoint).toMatchObject({
       method: "PATCH",
       source: "FETCH",
+      precisionScore: 94,
     });
     expect(buildReport("html", value).content).toContain(">PATCH<");
+    expect(buildReport("html", value).content).toContain(
+      "Fetch call-site · Dynamic route template",
+    );
     expect(buildReport("csv", value).content).toContain(
       '"Method","Endpoint source","Endpoint scope","Endpoint parameters"',
+    );
+    expect(buildReport("csv", value).content).toContain(
+      '"94","Fetch call-site | Dynamic route template"',
     );
   });
 });

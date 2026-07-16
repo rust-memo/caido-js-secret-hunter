@@ -5,13 +5,18 @@ import { RequestSpec } from "caido:utils";
 import { classifyContent } from "./content-classifier";
 import type { ContentClass } from "./content-classifier";
 import { rulePack, scanText } from "./detector";
-import { isAfterHistoryCutoff } from "./history-policy";
+import {
+  historyInspectionLimit,
+  isAfterHistoryCutoff,
+  isHistoryItemInCoverage,
+} from "./history-policy";
 import { buildReport } from "./report";
 import { HunterStore } from "./store";
 import type {
   AssetDTO,
   AssetQuery,
   DataArea,
+  DetectedFinding,
   EndpointQuery,
   EndpointSummary,
   FileQuery,
@@ -58,7 +63,7 @@ type FetchWork = {
 export class HunterScanner {
   private readonly store = new HunterStore();
   private settings: HunterSettings = {
-    scanAllHistory: true,
+    scanAllHistory: false,
     autoFetch: false,
     includeCredentials: false,
     assetExclusions: [
@@ -66,6 +71,9 @@ export class HunterScanner {
       "google-analytics",
       "googletagmanager",
       "gpt.js",
+      "modernizr",
+      "gtm",
+      "fbevents",
     ],
     maxDepth: 2,
     maxAssetsPerRoot: 200,
@@ -84,6 +92,7 @@ export class HunterScanner {
   };
   private generation = 0;
   private historyReading = false;
+  private historySelectionMessage = "";
   private paused = false;
   private readonly queue: Work[] = [];
   private readonly fetchQueue: FetchWork[] = [];
@@ -265,8 +274,15 @@ export class HunterScanner {
     const pair = await sdk.requests.get(requestId);
     if (pair === undefined || pair.response === undefined)
       throw new Error("A saved request and response are required");
-    if (!this.settings.scanAllHistory && !sdk.requests.inScope(pair.request))
-      throw new Error("Out-of-scope requests are disabled by Settings");
+    if (
+      !isHistoryItemInCoverage(
+        this.settings.scanAllHistory,
+        sdk.requests.inScope(pair.request),
+      )
+    )
+      throw new Error(
+        "Request is outside Caido Scope. Add its domain to Scope or disable In-scope traffic only in Settings.",
+      );
     const generation = this.generation;
     const work: Work = {
       generation,
@@ -342,6 +358,7 @@ export class HunterScanner {
     this.rootCounts.clear();
     this.state.scanned = 0;
     this.state.dropped = 0;
+    this.historySelectionMessage = "";
     this.historyReading = true;
     this.paused = true;
     this.state.phase = "STOPPING";
@@ -485,15 +502,19 @@ export class HunterScanner {
   ): Promise<void> {
     let cursor: string | undefined;
     let inspected = 0;
+    let selected = 0;
+    let skippedOutOfScope = 0;
+    const inspectionLimit = historyInspectionLimit(
+      this.settings.maxHistoryEntries,
+      this.settings.scanAllHistory,
+    );
     try {
       while (
-        inspected < this.settings.maxHistoryEntries &&
+        inspected < inspectionLimit &&
+        selected < this.settings.maxHistoryEntries &&
         generation === this.generation
       ) {
-        const amount = Math.min(
-          200,
-          this.settings.maxHistoryEntries - inspected,
-        );
+        const amount = Math.min(200, inspectionLimit - inspected);
         let query = sdk.requests
           .query()
           .descending("req", "created_at")
@@ -503,15 +524,21 @@ export class HunterScanner {
         if (page.items.length === 0) break;
         for (const item of page.items) {
           if (generation !== this.generation) return;
+          if (selected >= this.settings.maxHistoryEntries) break;
           inspected += 1;
+          if (
+            !isHistoryItemInCoverage(
+              this.settings.scanAllHistory,
+              sdk.requests.inScope(item.request),
+            )
+          ) {
+            skippedOutOfScope += 1;
+            continue;
+          }
           if (item.response === undefined) continue;
           if (!isAfterHistoryCutoff(item.request.getCreatedAt(), historyCutoff))
             continue;
-          if (
-            !this.settings.scanAllHistory &&
-            !sdk.requests.inScope(item.request)
-          )
-            continue;
+          selected += 1;
           this.enqueue(
             sdk,
             historyWork(generation, projectId, item.request, item.response),
@@ -522,8 +549,12 @@ export class HunterScanner {
         if (!page.pageInfo.hasNextPage) break;
         cursor = page.pageInfo.endCursor;
       }
-      if (generation === this.generation)
-        this.state.message = `Queued ${inspected} recent History entries`;
+      if (generation === this.generation) {
+        this.historySelectionMessage = this.settings.scanAllHistory
+          ? `${selected} responses selected from ${inspected} recent History entries`
+          : `${selected} in-scope responses selected from ${inspected} History entries; ${skippedOutOfScope} outside Scope skipped`;
+        this.state.message = this.historySelectionMessage;
+      }
     } catch (error) {
       this.state.message = `History scan failed: ${safeMessage(error)}`;
       sdk.console.error(this.state.message);
@@ -542,7 +573,13 @@ export class HunterScanner {
     response: Response,
   ): Promise<void> {
     if (this.paused || this.isSelfFetch(request.getUrl())) return;
-    if (!this.settings.scanAllHistory && !sdk.requests.inScope(request)) return;
+    if (
+      !isHistoryItemInCoverage(
+        this.settings.scanAllHistory,
+        sdk.requests.inScope(request),
+      )
+    )
+      return;
     const projectId = await this.currentProjectId(sdk);
     if (projectId === undefined) return;
     this.enqueue(
@@ -577,8 +614,10 @@ export class HunterScanner {
           if (!isAfterHistoryCutoff(item.request.getCreatedAt(), historyCutoff))
             continue;
           if (
-            !this.settings.scanAllHistory &&
-            !sdk.requests.inScope(item.request)
+            !isHistoryItemInCoverage(
+              this.settings.scanAllHistory,
+              sdk.requests.inScope(item.request),
+            )
           )
             continue;
           this.enqueue(
@@ -680,12 +719,18 @@ export class HunterScanner {
     }
     const text = body.toText();
     const detected = scanText(text, work.url);
+    const scoped = this.settings.scanAllHistory
+      ? detected
+      : detected.filter((finding) =>
+          findingInCaidoScope(sdk, finding, work.url),
+        );
+    const suppressed = detected.length - scoped.length;
     if (work.generation !== this.generation) return;
     const added = await this.store.addFindings(
       work.projectId,
       work.request.getId(),
       work.response.getId(),
-      detected,
+      scoped,
       this.settings.maxFindings,
     );
     if (work.generation !== this.generation) return;
@@ -694,7 +739,11 @@ export class HunterScanner {
     await this.saveAsset(
       work,
       "SCANNED",
-      `${detected.length} candidates; ${raw.length} bytes; ${contentClass.toLowerCase()}`,
+      `${scoped.length} candidates${
+        suppressed === 0
+          ? ""
+          : `; ${suppressed} out-of-scope endpoints suppressed`
+      }; ${raw.length} bytes; ${contentClass.toLowerCase()}`,
     );
 
     if (!work.expand || work.depth >= this.settings.maxDepth) return;
@@ -945,7 +994,11 @@ export class HunterScanner {
     )
       return;
     this.state.phase = "IDLE";
-    this.state.message = `Background scan complete: ${this.state.scanned} responses analyzed`;
+    this.state.message = `Background scan complete: ${this.state.scanned} responses analyzed${
+      this.historySelectionMessage === ""
+        ? ""
+        : `; ${this.historySelectionMessage}`
+    }`;
     this.publishState(sdk);
     this.scheduleDataChanged(sdk, "overview", "findings", "files", "assets");
   }
@@ -1163,6 +1216,30 @@ function sameOrigin(left: string, right: string): boolean {
       target.getHost().toLowerCase() === parent.getHost().toLowerCase() &&
       target.getPort() === parent.getPort()
     );
+  } catch {
+    return false;
+  }
+}
+
+function findingInCaidoScope(
+  sdk: HunterSDK,
+  finding: DetectedFinding,
+  assetUrl: string,
+): boolean {
+  if (
+    finding.kind !== "ENDPOINT" ||
+    finding.endpoint === undefined ||
+    finding.endpoint.scope === "SAME_ORIGIN" ||
+    finding.endpoint.scope === "UNKNOWN"
+  )
+    return true;
+  let candidate = finding.rawValue;
+  if (/^wss?:\/\//i.test(candidate))
+    candidate = candidate.replace(/^ws/i, "http");
+  const resolved = resolveUrl(assetUrl, candidate);
+  if (resolved === undefined) return false;
+  try {
+    return sdk.requests.inScope(new RequestSpec(resolved));
   } catch {
     return false;
   }

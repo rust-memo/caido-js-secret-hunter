@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { isAfterHistoryCutoff } from "./history-policy";
+import {
+  historyInspectionLimit,
+  isAfterHistoryCutoff,
+  isHistoryItemInCoverage,
+} from "./history-policy";
 
 describe("cleared History policy", () => {
   const cutoff = new Date("2026-07-16T06:00:00.000Z").getTime();
@@ -25,5 +29,20 @@ describe("cleared History policy", () => {
       isAfterHistoryCutoff(new Date("2026-07-16T06:00:00.001Z"), cutoff),
     ).toBe(true);
     expect(isAfterHistoryCutoff(new Date("invalid"), cutoff)).toBe(false);
+  });
+});
+
+describe("History coverage policy", () => {
+  it("requires Caido Scope unless all-History mode is explicitly enabled", () => {
+    expect(isHistoryItemInCoverage(false, true)).toBe(true);
+    expect(isHistoryItemInCoverage(false, false)).toBe(false);
+    expect(isHistoryItemInCoverage(true, false)).toBe(true);
+  });
+
+  it("looks deeper into History to fill the in-scope response quota", () => {
+    expect(historyInspectionLimit(5_000, true)).toBe(5_000);
+    expect(historyInspectionLimit(5_000, false)).toBe(50_000);
+    expect(historyInspectionLimit(100, false)).toBe(1_000);
+    expect(historyInspectionLimit(50_000, false)).toBe(50_000);
   });
 });

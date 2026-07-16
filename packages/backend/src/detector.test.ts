@@ -7,7 +7,7 @@ import { decodeEscapes, rulePack, scanText, shannonEntropy } from "./detector";
 describe("Caido JS Secret Hunter detector", () => {
   it("loads and compiles every bundled rule", () => {
     expect(rulePack.rules).toHaveLength(43);
-    expect(rulePack.version).toBe("2026.07.4");
+    expect(rulePack.version).toBe("2026.07.5");
   });
 
   it("detects provider tokens and masks the stored presentation", () => {
@@ -61,6 +61,22 @@ describe("Caido JS Secret Hunter detector", () => {
     );
     expect(
       findings.some((finding) => finding.ruleId === "hardcoded-password"),
+    ).toBe(false);
+  });
+
+  it("suppresses obvious mock and documentation credentials", () => {
+    const findings = scanText(
+      [
+        'const password = "not-a-real-password";',
+        'const api_key = "dummy_api_key_value_1234567890";',
+        'const client_secret = "{{CLIENT_SECRET}}";',
+      ].join("\n"),
+      "https://app.test/app.js",
+    );
+    expect(
+      findings.some((finding) =>
+        ["hardcoded-password", "generic-api-secret"].includes(finding.ruleId),
+      ),
     ).toBe(false);
   });
 

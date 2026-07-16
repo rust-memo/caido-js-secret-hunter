@@ -35,6 +35,8 @@ export type EndpointMetadata = {
   parameters: string[];
   dynamic: boolean;
   canonical: string;
+  precisionScore: number;
+  signals: string[];
 };
 
 export type RuleDefinition = {
@@ -183,6 +185,7 @@ export type EndpointQuery = {
   status: "ALL" | ReviewStatus;
   method: "ALL" | EndpointMethod;
   scope: "ALL" | EndpointScope;
+  minimumScore: number;
   offset: number;
   limit: number;
 };
@@ -193,6 +196,7 @@ export type EndpointSummary = {
   dynamicRoutes: number;
   crossOrigin: number;
   parameterized: number;
+  highPrecision: number;
   methods: Partial<Record<EndpointMethod, number>>;
   sources: Partial<Record<EndpointSource, number>>;
 };

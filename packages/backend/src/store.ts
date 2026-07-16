@@ -25,10 +25,18 @@ import type {
 } from "./types";
 
 const DEFAULT_SETTINGS: HunterSettings = {
-  scanAllHistory: true,
+  scanAllHistory: false,
   autoFetch: false,
   includeCredentials: false,
-  assetExclusions: ["jquery", "google-analytics", "googletagmanager", "gpt.js"],
+  assetExclusions: [
+    "jquery",
+    "google-analytics",
+    "googletagmanager",
+    "gpt.js",
+    "modernizr",
+    "gtm",
+    "fbevents",
+  ],
   maxDepth: 2,
   maxAssetsPerRoot: 200,
   maxBodyBytes: 5 * 1024 * 1024,
@@ -64,6 +72,8 @@ type FindingRow = {
   endpoint_parameters: string;
   endpoint_dynamic: number;
   endpoint_canonical: string;
+  endpoint_score: number;
+  endpoint_signals: string;
 };
 
 type AssetRow = {
@@ -137,6 +147,8 @@ export class HunterStore {
         endpoint_parameters TEXT NOT NULL DEFAULT '[]',
         endpoint_dynamic INTEGER NOT NULL DEFAULT 0,
         endpoint_canonical TEXT NOT NULL DEFAULT '',
+        endpoint_score INTEGER NOT NULL DEFAULT 0,
+        endpoint_signals TEXT NOT NULL DEFAULT '[]',
         PRIMARY KEY (project_id, fingerprint)
       );
       CREATE INDEX IF NOT EXISTS findings_project_asset ON findings(project_id, asset_url);
@@ -188,7 +200,7 @@ export class HunterStore {
         project_id TEXT PRIMARY KEY,
         history_cutoff TEXT NOT NULL
       );
-      INSERT OR IGNORE INTO hunter_schema(key, version) VALUES('js-secret-hunter', 5);
+      INSERT OR IGNORE INTO hunter_schema(key, version) VALUES('js-secret-hunter', 7);
     `);
     await this.migrateSchema();
   }
@@ -364,12 +376,17 @@ export class HunterStore {
       );
       parameters.push(query.scope);
     }
+    if (query.minimumScore > 0) {
+      where.push("findings.endpoint_score >= ?");
+      parameters.push(query.minimumScore);
+    }
     if (query.search !== "") {
       where.push(`instr(lower(
         findings.rule_name || ' ' || findings.rule_id || ' ' || findings.asset_url || ' ' ||
         findings.masked_value || ' ' || findings.endpoint_canonical || ' ' ||
         findings.endpoint_parameters || ' ' || findings.endpoint_method || ' ' ||
         findings.endpoint_source || ' ' || findings.endpoint_scope || ' ' ||
+        findings.endpoint_signals || ' ' ||
         COALESCE(finding_notes.note, '')
       ), ?) > 0`);
       parameters.push(query.search);
@@ -406,7 +423,8 @@ export class HunterStore {
               COALESCE(NULLIF(endpoint_canonical, ''), masked_value)) AS unique_routes,
             COALESCE(SUM(CASE WHEN endpoint_dynamic = 1 THEN 1 ELSE 0 END), 0) AS dynamic_routes,
             COALESCE(SUM(CASE WHEN endpoint_scope = 'CROSS_ORIGIN' THEN 1 ELSE 0 END), 0) AS cross_origin,
-            COALESCE(SUM(CASE WHEN endpoint_parameters <> '[]' THEN 1 ELSE 0 END), 0) AS parameterized
+            COALESCE(SUM(CASE WHEN endpoint_parameters <> '[]' THEN 1 ELSE 0 END), 0) AS parameterized,
+            COALESCE(SUM(CASE WHEN endpoint_score >= 80 THEN 1 ELSE 0 END), 0) AS high_precision
           FROM findings WHERE project_id = ? AND kind = 'ENDPOINT'`,
         )
         .then((statement) =>
@@ -416,6 +434,7 @@ export class HunterStore {
             dynamic_routes: number;
             cross_origin: number;
             parameterized: number;
+            high_precision: number;
           }>(projectId),
         ),
       database
@@ -441,6 +460,7 @@ export class HunterStore {
       dynamicRoutes: statistics?.dynamic_routes ?? 0,
       crossOrigin: statistics?.cross_origin ?? 0,
       parameterized: statistics?.parameterized ?? 0,
+      highPrecision: statistics?.high_precision ?? 0,
       methods: endpointCounts(methodRows, isEndpointMethod),
       sources: endpointCounts(sourceRows, isEndpointSource),
     };
@@ -566,8 +586,9 @@ export class HunterStore {
         project_id, fingerprint, request_id, response_id, value_hash, rule_id, rule_name, kind,
         severity, confidence, asset_url, line, start_offset, end_offset, preview, masked_value,
         evidence_highlight, endpoint_method, endpoint_source, endpoint_scope, endpoint_parameters,
-        endpoint_dynamic, endpoint_canonical, status, published, created_at
-      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?
+        endpoint_dynamic, endpoint_canonical, endpoint_score, endpoint_signals, status, published,
+        created_at
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?
         WHERE (SELECT COUNT(*) FROM findings WHERE project_id = ?) < ?
     `);
     let added = 0;
@@ -605,6 +626,8 @@ export class HunterStore {
         JSON.stringify(finding.endpoint?.parameters ?? []),
         finding.endpoint?.dynamic === true ? 1 : 0,
         finding.endpoint?.canonical ?? "",
+        finding.endpoint?.precisionScore ?? 0,
+        JSON.stringify(finding.endpoint?.signals ?? []),
         review?.status ?? "NEEDS_REVIEW",
         new Date().toISOString(),
         projectId,
@@ -811,6 +834,11 @@ export class HunterStore {
 
   private async migrateSchema(): Promise<void> {
     const database = this.requireDatabase();
+    const schema = await database
+      .prepare("SELECT version FROM hunter_schema WHERE key = ?")
+      .then((statement) =>
+        statement.get<{ version: number }>("js-secret-hunter"),
+      );
     const columns = await database
       .prepare("PRAGMA table_info(findings)")
       .then((statement) => statement.all<{ name: string }>());
@@ -823,6 +851,8 @@ export class HunterStore {
       ["endpoint_parameters", "TEXT NOT NULL DEFAULT '[]'"],
       ["endpoint_dynamic", "INTEGER NOT NULL DEFAULT 0"],
       ["endpoint_canonical", "TEXT NOT NULL DEFAULT ''"],
+      ["endpoint_score", "INTEGER NOT NULL DEFAULT 0"],
+      ["endpoint_signals", "TEXT NOT NULL DEFAULT '[]'"],
     ] as const;
     for (const [name, definition] of additions)
       if (!existing.has(name))
@@ -848,9 +878,41 @@ export class HunterStore {
       END;
       CREATE INDEX IF NOT EXISTS findings_endpoint_inventory
         ON findings(project_id, kind, endpoint_method, endpoint_scope, endpoint_canonical);
-      UPDATE hunter_schema SET version = 5
-        WHERE key = 'js-secret-hunter' AND version < 5;
+      CREATE INDEX IF NOT EXISTS findings_endpoint_precision
+        ON findings(project_id, kind, endpoint_score, created_at DESC);
+      UPDATE findings SET
+        endpoint_score = CASE confidence
+          WHEN 'HIGH' THEN 90 WHEN 'MEDIUM' THEN 70 ELSE 50 END,
+        endpoint_signals = '["Legacy observation; rebuild for full precision signals"]'
+        WHERE kind = 'ENDPOINT' AND endpoint_score = 0;
     `);
+    if ((schema?.version ?? 7) < 7) {
+      const row = await database
+        .prepare("SELECT value FROM settings WHERE key = ?")
+        .then((statement) => statement.get<{ value: string }>("hunter"));
+      if (row !== undefined) {
+        try {
+          const legacy = JSON.parse(row.value) as Partial<HunterSettings>;
+          await database
+            .prepare("UPDATE settings SET value = ? WHERE key = ?")
+            .then((statement) =>
+              statement.run(
+                JSON.stringify({ ...legacy, scanAllHistory: false }),
+                "hunter",
+              ),
+            );
+        } catch {
+          await database
+            .prepare("DELETE FROM settings WHERE key = ?")
+            .then((statement) => statement.run("hunter"));
+        }
+      }
+    }
+    await database
+      .prepare(
+        "UPDATE hunter_schema SET version = 7 WHERE key = ? AND version < 7",
+      )
+      .then((statement) => statement.run("js-secret-hunter"));
   }
 
   private requireDatabase(): Database {
@@ -878,6 +940,7 @@ export function normalizeEndpointQuery(value: EndpointQuery): EndpointQuery {
     status: isReviewFilter(value.status) ? value.status : "ALL",
     method: isEndpointMethodFilter(value.method) ? value.method : "ALL",
     scope: isEndpointScopeFilter(value.scope) ? value.scope : "ALL",
+    minimumScore: clamp(value.minimumScore, 0, 100),
     ...normalizePage(value),
   };
 }
@@ -985,6 +1048,8 @@ function toFinding(row: FindingRow): FindingDTO {
             parameters: parseParameters(row.endpoint_parameters),
             dynamic: row.endpoint_dynamic === 1,
             canonical: row.endpoint_canonical || row.masked_value,
+            precisionScore: clamp(row.endpoint_score, 0, 100),
+            signals: parseSignals(row.endpoint_signals),
           }
         : undefined,
     status: row.status,
@@ -1141,6 +1206,20 @@ function parseParameters(value: string): string[] {
           .filter((item): item is string => typeof item === "string")
           .map((item) => clip(item, 80))
           .slice(0, 32)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseSignals(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => clip(item, 120))
+          .slice(0, 8)
       : [];
   } catch {
     return [];
