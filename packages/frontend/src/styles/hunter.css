@@ -242,7 +242,7 @@
 .endpoint-heading p { max-width: 720px; }
 .endpoint-method-mix { max-width: 440px; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .endpoint-method-mix > span { display: inline-flex; align-items: center; gap: 5px; color: var(--hunter-muted); font-size: 9px; }
-.endpoint-metrics { display: grid; grid-template-columns: repeat(5, minmax(135px, 1fr)); gap: 9px; margin-bottom: 12px; }
+.endpoint-metrics { display: grid; grid-template-columns: repeat(6, minmax(125px, 1fr)); gap: 9px; margin-bottom: 12px; }
 .endpoint-metrics article { position: relative; min-height: 88px; display: flex; flex-direction: column; padding: 12px 13px; border: 1px solid var(--hunter-border); border-radius: 10px; background: linear-gradient(145deg, rgba(59, 130, 246, 0.045), transparent 58%), var(--hunter-surface); overflow: hidden; }
 .endpoint-metrics article::after { position: absolute; right: -18px; bottom: -28px; width: 70px; height: 70px; border: 1px solid rgba(96, 165, 250, 0.07); border-radius: 50%; content: ""; }
 .endpoint-metrics span { color: var(--hunter-muted); font-size: 8px; font-weight: 750; text-transform: uppercase; letter-spacing: 0.055em; }
@@ -260,7 +260,13 @@
 .endpoint-canonical { max-width: 480px; color: #7f91a8 !important; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .endpoint-parameter-list { max-width: 250px; display: flex; flex-wrap: wrap; gap: 4px; }
 .endpoint-parameter-list span { max-width: 130px; padding: 3px 5px; border: 1px solid rgba(96, 165, 250, 0.18); border-radius: 5px; color: #bfdbfe; background: rgba(30, 64, 175, 0.1); font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; }
+.endpoint-signal-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.endpoint-signal-list span { padding: 3px 6px; border: 1px solid rgba(34, 197, 94, 0.18); border-radius: 5px; color: #bbf7d0; background: rgba(22, 163, 74, 0.08); font-size: 8px; }
 .endpoint-scope { display: inline-flex; margin-bottom: 2px; padding: 3px 6px; border-radius: 999px; color: var(--hunter-muted); background: rgba(100, 116, 139, 0.12); font-size: 8px; font-weight: 700; }
+.endpoint-precision { display: inline-flex; margin: 0 0 2px 4px; padding: 3px 6px; border: 1px solid transparent; border-radius: 999px; font-size: 8px; font-weight: 750; }
+.precision-high { border-color: rgba(34, 197, 94, 0.22); color: #bbf7d0; background: rgba(22, 163, 74, 0.13); }
+.precision-medium { border-color: rgba(250, 204, 21, 0.22); color: #fef08a; background: rgba(161, 98, 7, 0.13); }
+.precision-low { border-color: rgba(148, 163, 184, 0.2); color: #cbd5e1; background: rgba(100, 116, 139, 0.13); }
 .scope-SAME_ORIGIN { color: #bbf7d0; background: rgba(22, 163, 74, 0.12); }
 .scope-CROSS_ORIGIN { color: #fed7aa; background: rgba(194, 65, 12, 0.14); }
 .scope-NON_HTTP { color: #ddd6fe; background: rgba(109, 40, 217, 0.13); }

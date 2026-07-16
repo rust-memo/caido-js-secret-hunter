@@ -550,6 +550,10 @@ function togglePage() {
                 <dt>Parameters</dt>
                 <dd>{{ selected.endpoint.parameters.length }}</dd>
               </div>
+              <div>
+                <dt>Precision</dt>
+                <dd>{{ selected.endpoint.precisionScore }} / 100</dd>
+              </div>
             </dl>
             <code class="endpoint-detail-pattern">
               {{ selected.endpoint.canonical }}
@@ -563,6 +567,14 @@ function togglePage() {
                 :key="parameter"
               >
                 {{ parameter }}
+              </span>
+            </div>
+            <div
+              v-if="selected.endpoint.signals.length"
+              class="endpoint-signal-list"
+            >
+              <span v-for="signal in selected.endpoint.signals" :key="signal">
+                {{ signal }}
               </span>
             </div>
           </div>

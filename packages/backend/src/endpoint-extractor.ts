@@ -20,6 +20,12 @@ type InvocationContext = {
   source: EndpointSource;
 };
 
+type EndpointAssessment = {
+  accepted: boolean;
+  score: number;
+  signals: string[];
+};
+
 const STRING_LITERAL =
   /"((?:\\[\s\S]|[^"\\]){2,4096})"|'((?:\\[\s\S]|[^'\\]){2,4096})'|`((?:\\[\s\S]|[^`\\]){2,4096})`/g;
 const ENDPOINT_FILE =
@@ -28,8 +34,16 @@ const STATIC_FILE =
   /\.(?:7z|avif|bmp|css|eot|gif|gz|ico|jpe?g|m?js|map|mp3|mp4|ogg|otf|pdf|png|rar|svg|tar|tgz|ttf|webm|webp|woff2?|zip)(?:[?#]|$)/i;
 const RELATIVE_ROUTE_HINT =
   /^(?:api|auth|oauth|admin|account|accounts|graphql|graphiql|internal|manage|management|reports?|rest|rpc|search|service|services|session|user|users|v[0-9]+)\//i;
+const ROUTE_SEGMENT_HINT =
+  /^(?:account|accounts|admin|auth|callback|catalog|checkout|customers?|dashboard|debug|graphql|health|internal|invoices?|login|logout|manage|metrics|oauth|orders?|payments?|profile|reports?|rest|rpc|search|services?|session|settings|signup|status|subscriptions?|users?|v[0-9]+)(?:\/|$)/i;
 const GENERIC_RELATIVE_ROUTE =
   /^[A-Za-z0-9._~!$&()+,;=:@%{}-]+(?:\/[A-Za-z0-9._~!$&()+,;=:@%{}-]+)+(?:[?#][^\s]*)?$/;
+const ASSET_PATH_HINT =
+  /^(?:assets?|bundles?|chunks?|css|fonts?|icons?|images?|img|i18n|locales?|node_modules|scripts?|static|styles?|themes?|translations?|vendor|webpack)(?:\/|$)/i;
+const LOCALIZATION_PATH =
+  /^(?:[a-z]{2}(?:[-_][a-z]{2})?|locales?)\/(?:common|messages?|translations?)(?:\/|$)/i;
+const ASSIGNMENT_HINT =
+  /\b(?:action|api|endpoint|href|link|path|resource|route|uri|url)[A-Za-z0-9_$-]*\s*[:=]\s*$/i;
 const UNSAFE_SCHEME = /^(?:blob|data|file|javascript|mailto|tel|webpack):/i;
 const HTTP_METHOD = "GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT";
 const MODULE_PREFIXES = new Set([
@@ -82,15 +96,12 @@ export function extractEndpointReferences(
       match.index + match[0].length,
     );
     if (!isEndpoint(value, context.source)) continue;
+    const assessment = assessEndpoint(value, context, text, match.index);
+    if (!assessment.accepted) continue;
     const local = match[0].indexOf(raw);
     const start = match.index + Math.max(0, local);
-    const described = describeEndpoint(value, assetUrl, context);
-    const confidence: Confidence =
-      context.source === "LITERAL"
-        ? /^(?:https?|wss?):\/\/|^(?:\/|\.\.\/|\.\/)/i.test(value)
-          ? "MEDIUM"
-          : "LOW"
-        : "HIGH";
+    const described = describeEndpoint(value, assetUrl, context, assessment);
+    const confidence = confidenceForScore(assessment.score);
     output.set(`${context.method}\n${value}`, {
       value,
       raw,
@@ -108,6 +119,7 @@ export function describeEndpoint(
   value: string,
   assetUrl: string,
   context: InvocationContext = { method: "ANY", source: "DETECTOR" },
+  assessment = assessEndpoint(value, context),
 ): { presentation: string; metadata: EndpointMetadata } {
   const resolved = resolveTemplateReference(value, assetUrl);
   const presentation = redactEndpoint(resolved);
@@ -120,6 +132,8 @@ export function describeEndpoint(
       parameters: extractParameters(value),
       dynamic: /\{[^}]+\}|(?:^|\/)[:*][A-Za-z_]/.test(value),
       canonical: canonicalizeEndpoint(presentation),
+      precisionScore: assessment.score,
+      signals: assessment.signals,
     },
   };
 }
@@ -183,9 +197,141 @@ function isEndpoint(value: string, source: EndpointSource): boolean {
   return source !== "MARKUP" || !value.startsWith("assets/");
 }
 
+function assessEndpoint(
+  value: string,
+  context: InvocationContext,
+  text = "",
+  literalStart = 0,
+): EndpointAssessment {
+  const signals: string[] = [];
+  const routePath = pathForAssessment(value);
+  const absolute = /^(?:https?|wss?):\/\//i.test(value);
+  const networkPath = value.startsWith("//");
+  const rootRelative = value.startsWith("/") && !networkPath;
+  const dotRelative = value.startsWith("./") || value.startsWith("../");
+  const endpointFile = ENDPOINT_FILE.test(value);
+  const routeHint =
+    RELATIVE_ROUTE_HINT.test(value) || ROUTE_SEGMENT_HINT.test(routePath);
+  const generic = GENERIC_RELATIVE_ROUTE.test(value);
+  const dynamic =
+    /\{[^}]+\}|(?:^|\/)[:*][A-Za-z_]/.test(value) || value.includes("${");
+  const parameterized = /[?&][^=&#]{1,80}(?:=|&|#|$)/.test(value);
+  const assignedAsEndpoint =
+    text !== "" &&
+    ASSIGNMENT_HINT.test(
+      text.slice(Math.max(0, literalStart - 140), literalStart),
+    );
+  let score = context.source === "LITERAL" ? 20 : 90;
+
+  if (context.source === "DETECTOR") {
+    score = 78;
+    signals.push("Dedicated detector rule");
+  } else if (context.source !== "LITERAL") {
+    signals.push(`${sourceLabel(context.source)} call-site`);
+  }
+  if (absolute) {
+    score += 45;
+    signals.push("Absolute service URL");
+  } else if (networkPath) {
+    score += 40;
+    signals.push("Protocol-relative URL");
+  } else if (rootRelative) {
+    score += 35;
+    signals.push("Root-relative route");
+  } else if (dotRelative) {
+    score += 30;
+    signals.push("Document-relative route");
+  }
+  if (endpointFile) {
+    score += 30;
+    signals.push("Server endpoint extension");
+  }
+  if (routeHint) {
+    score += 25;
+    signals.push("Application route vocabulary");
+  }
+  if (generic) {
+    score += 10;
+    signals.push("Multi-segment path");
+  }
+  if (assignedAsEndpoint) {
+    score += 20;
+    signals.push("Endpoint-named assignment");
+  }
+  if (parameterized) {
+    score += 10;
+    signals.push("Request parameters");
+  }
+  if (dynamic) {
+    score += 12;
+    signals.push("Dynamic route template");
+  }
+  if (looksPluralResource(routePath)) {
+    score += 12;
+    signals.push("REST-style resource");
+  }
+  if (ASSET_PATH_HINT.test(routePath)) {
+    score -= context.source === "MARKUP" ? 90 : 35;
+    signals.push("Asset-like path penalty");
+  }
+  if (LOCALIZATION_PATH.test(routePath)) {
+    score -= 45;
+    signals.push("Localization-like path penalty");
+  }
+
+  const bounded = Math.max(0, Math.min(100, score));
+  return {
+    accepted: bounded >= 45,
+    score: bounded,
+    signals: signals.slice(0, 8),
+  };
+}
+
+function confidenceForScore(score: number): Confidence {
+  if (score >= 80) return "HIGH";
+  if (score >= 60) return "MEDIUM";
+  return "LOW";
+}
+
+function pathForAssessment(value: string): string {
+  const withoutOrigin = value.replace(/^(?:https?|wss?):\/\/[^/?#]+/i, "");
+  return (
+    withoutOrigin
+      .replace(/^(?:\/\/[^/?#]+|\.\.\/|\.\/|\/)+/, "")
+      .split(/[?#]/, 1)[0] ?? ""
+  );
+}
+
+function looksPluralResource(value: string): boolean {
+  const first = value.split("/", 1)[0] ?? "";
+  return /^[A-Za-z][A-Za-z0-9_-]{2,48}s$/.test(first);
+}
+
+function sourceLabel(source: EndpointSource): string {
+  const labels: Record<EndpointSource, string> = {
+    DETECTOR: "Detector",
+    LITERAL: "Literal",
+    FETCH: "Fetch",
+    AXIOS: "Axios",
+    XHR: "XHR",
+    JQUERY: "jQuery",
+    ROUTER: "Router",
+    MARKUP: "Markup",
+    WEBSOCKET: "WebSocket",
+  };
+  return labels[source];
+}
+
 function isImportSpecifier(text: string, literalStart: number): boolean {
-  const prefix = text.slice(Math.max(0, literalStart - 100), literalStart);
-  return /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)$/i.test(prefix);
+  const prefix = text.slice(Math.max(0, literalStart - 360), literalStart);
+  return [
+    /\b(?:import|export)\s+[\s\S]{0,240}\bfrom\s*$/i,
+    /\bimport\s*\(\s*(?:\/\*[\s\S]{0,180}?\*\/\s*)?$/i,
+    /\brequire(?:\.resolve)?\s*\(\s*$/i,
+    /\b(?:jest\.)?(?:doMock|mock|unmock)\s*\(\s*$/i,
+    /\bSystem\.(?:import|register)\s*\(\s*$/i,
+    /\b(?:define|require)\s*\(\s*\[[^\]]*$/i,
+  ].some((pattern) => pattern.test(prefix));
 }
 
 function inferContext(
