@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  correctedPageOffset,
   createRequestGate,
   formatDate,
   hostOf,
@@ -40,5 +41,20 @@ describe("frontend utilities", () => {
     expect(gate.isCurrent(second)).toBe(true);
     gate.invalidate();
     expect(gate.isCurrent(second)).toBe(false);
+  });
+
+  it("recovers pagination when a result mutation removes the current page", () => {
+    expect(
+      correctedPageOffset({ items: [], total: 51, offset: 100, limit: 50 }),
+    ).toBe(50);
+    expect(
+      correctedPageOffset({ items: [], total: 0, offset: 50, limit: 50 }),
+    ).toBeUndefined();
+    expect(
+      correctedPageOffset({ items: [], total: 100, offset: 50, limit: 50 }),
+    ).toBe(0);
+    expect(
+      correctedPageOffset({ items: [{}], total: 51, offset: 50, limit: 50 }),
+    ).toBeUndefined();
   });
 });

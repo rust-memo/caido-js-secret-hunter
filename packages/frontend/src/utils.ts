@@ -44,6 +44,19 @@ export function createRequestGate(): {
   };
 }
 
+export function correctedPageOffset(page: {
+  items: unknown[];
+  total: number;
+  offset: number;
+  limit: number;
+}): number | undefined {
+  if (page.items.length > 0 || page.total <= 0 || page.limit <= 0)
+    return undefined;
+  const lastOffset = Math.floor((page.total - 1) / page.limit) * page.limit;
+  if (page.offset >= page.total) return lastOffset;
+  return page.offset > 0 ? 0 : undefined;
+}
+
 export function downloadReport(file: {
   filename: string;
   mediaType: string;

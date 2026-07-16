@@ -15,6 +15,7 @@ export default defineConfig({
         "packages/backend/src/content-classifier.ts",
         "packages/backend/src/detector.ts",
         "packages/backend/src/endpoint-extractor.ts",
+        "packages/backend/src/history-policy.ts",
         "packages/backend/src/report.ts",
         "packages/backend/src/store.ts",
         "packages/frontend/src/components/ConfirmDialog.vue",

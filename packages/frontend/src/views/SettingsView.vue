@@ -90,7 +90,7 @@ async function clearResults() {
   const accepted = await confirm({
     title: "Clear project results",
     message:
-      "Delete current findings and asset activity? Saved review states, notes, Settings, and ignored values are retained.",
+      "Delete current findings and asset activity? Saved review states, notes, Settings, and ignored values are retained. Previously captured History stays cleared until you explicitly run Scan History or Rebuild; newly captured responses continue to be analyzed.",
     confirmLabel: "Clear results",
     danger: true,
   });
@@ -306,7 +306,9 @@ async function run(action: () => Promise<unknown>, success: string) {
           <h3>Results and exclusions</h3>
           <p class="hunter-panel-copy">
             Saving Settings is non-destructive. Use rebuild only when you
-            intentionally want to replace current results.
+            intentionally want to replace current results. Clear results keeps a
+            project checkpoint so automatic monitoring cannot silently restore
+            older History.
           </p>
           <div class="hunter-maintenance-actions">
             <button class="hunter-button" :disabled="busy" @click="rebuild">

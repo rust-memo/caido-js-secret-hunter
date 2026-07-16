@@ -11,6 +11,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import PaginationControls from "@/components/PaginationControls.vue";
 import { useSDK } from "@/plugins/sdk";
 import {
+  correctedPageOffset,
   createRequestGate,
   formatDate,
   hostOf,
@@ -89,6 +90,12 @@ async function load(offset: number) {
       sdk.backend.getEndpointSummary(),
     ]);
     if (!requestGate.isCurrent(request)) return;
+    const corrected = correctedPageOffset(nextPage);
+    if (corrected !== undefined) {
+      summary.value = nextSummary;
+      void load(corrected);
+      return;
+    }
     page.value = nextPage;
     summary.value = nextSummary;
   } catch (cause) {

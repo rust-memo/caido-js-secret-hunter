@@ -8,6 +8,7 @@ import SeverityBadge from "@/components/SeverityBadge.vue";
 import { useConfirm } from "@/plugins/confirm";
 import { useSDK } from "@/plugins/sdk";
 import {
+  correctedPageOffset,
   createRequestGate,
   formatDate,
   hostOf,
@@ -107,11 +108,17 @@ async function load(offset: number, refreshSelected = false) {
   try {
     const nextPage = await sdk.backend.listFindings(query(offset));
     if (!listGate.isCurrent(request)) return;
+    const corrected = correctedPageOffset(nextPage);
+    if (corrected !== undefined) {
+      void load(corrected, refreshSelected);
+      return;
+    }
     page.value = nextPage;
     if (refreshSelected && selected.value !== undefined) {
       const current = await sdk.backend.getFinding(selected.value.fingerprint);
       if (listGate.isCurrent(request) && current !== undefined)
         hydrateSelected(current);
+      else if (listGate.isCurrent(request)) clearSelected();
     }
   } catch (cause) {
     if (listGate.isCurrent(request))
@@ -144,6 +151,12 @@ async function selectFinding(finding: FindingDTO) {
 function hydrateSelected(finding: FindingDTO) {
   selected.value = finding;
   reviewNote.value = finding.reviewNote;
+}
+
+function clearSelected() {
+  selected.value = undefined;
+  reviewNote.value = "";
+  messageGate.invalidate();
 }
 
 function mountEditors() {

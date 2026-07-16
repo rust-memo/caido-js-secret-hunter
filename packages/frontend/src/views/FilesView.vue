@@ -7,7 +7,7 @@ import PaginationControls from "@/components/PaginationControls.vue";
 import SeverityBadge from "@/components/SeverityBadge.vue";
 import { useConfirm } from "@/plugins/confirm";
 import { useSDK } from "@/plugins/sdk";
-import { createRequestGate, safeMessage } from "@/utils";
+import { correctedPageOffset, createRequestGate, safeMessage } from "@/utils";
 
 const { revision } = defineProps<{ revision: number }>();
 const emit = defineEmits<{ refresh: [] }>();
@@ -69,6 +69,11 @@ async function load(offset: number) {
       limit: page.value.limit,
     });
     if (!listGate.isCurrent(request)) return;
+    const corrected = correctedPageOffset(nextPage);
+    if (corrected !== undefined) {
+      void load(corrected);
+      return;
+    }
     page.value = nextPage;
     if (
       selected.value !== undefined &&
