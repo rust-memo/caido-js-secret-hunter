@@ -5,6 +5,7 @@ import { RequestSpec } from "caido:utils";
 import { classifyContent } from "./content-classifier";
 import type { ContentClass } from "./content-classifier";
 import { rulePack, scanText } from "./detector";
+import { isAfterHistoryCutoff } from "./history-policy";
 import { buildReport } from "./report";
 import { HunterStore } from "./store";
 import type {
@@ -94,6 +95,7 @@ export class HunterScanner {
   private readonly scheduled = new Set<string>();
   private readonly selfFetchCounts = new Map<string, number>();
   private readonly rootCounts = new Map<string, number>();
+  private readonly historyCutoffs = new Map<string, number>();
   private revision = 0;
   private readonly pendingAreas = new Set<DataArea>();
   private changeScheduled = false;
@@ -301,8 +303,11 @@ export class HunterScanner {
     const projectId = await this.requireProjectId(sdk);
     const generation = this.stopForMutation(sdk, "Clearing results");
     if (!(await this.waitForOlderWorkers(generation))) return;
-    await this.store.clearResults(projectId);
+    const historyCutoff = new Date().toISOString();
+    await this.store.clearResults(projectId, historyCutoff);
     if (generation !== this.generation) return;
+    this.historyCutoffs.set(projectId, new Date(historyCutoff).getTime());
+    this.processed.clear();
     this.paused = false;
     this.state.phase = "IDLE";
     this.state.scanned = 0;
@@ -317,7 +322,11 @@ export class HunterScanner {
     await this.rescan(sdk, true);
   }
 
-  async rescan(sdk: HunterSDK, clear: boolean): Promise<void> {
+  async rescan(
+    sdk: HunterSDK,
+    clear: boolean,
+    restoreClearedHistory = false,
+  ): Promise<void> {
     const projectId = await this.currentProjectId(sdk);
     if (projectId === undefined) {
       this.cancel(sdk, "No active project");
@@ -333,26 +342,41 @@ export class HunterScanner {
     this.rootCounts.clear();
     this.state.scanned = 0;
     this.state.dropped = 0;
-    this.state.findings = clear ? 0 : await this.store.findingCount(projectId);
     this.historyReading = true;
-    this.paused = clear;
-    this.state.phase = clear ? "STOPPING" : "SCANNING";
+    this.paused = true;
+    this.state.phase = "STOPPING";
     this.state.message = clear
       ? "Waiting for active work before rebuilding results"
-      : "Reading Caido HTTP History";
+      : "Preparing the project history scan";
     this.publishState(sdk);
     this.scheduleDataChanged(sdk, "overview");
+    let historyCutoff: number | undefined;
+    if (restoreClearedHistory && !clear) {
+      await this.store.resetHistoryCutoff(projectId);
+      this.historyCutoffs.delete(projectId);
+    } else if (clear) {
+      this.historyCutoffs.delete(projectId);
+    } else {
+      const savedCutoff = await this.store.getHistoryCutoff(projectId);
+      historyCutoff =
+        savedCutoff === undefined ? undefined : new Date(savedCutoff).getTime();
+      if (historyCutoff === undefined) this.historyCutoffs.delete(projectId);
+      else this.historyCutoffs.set(projectId, historyCutoff);
+    }
+    this.state.findings = clear ? 0 : await this.store.findingCount(projectId);
+    if (generation !== this.generation) return;
     if (clear) {
       if (!(await this.waitForOlderWorkers(generation))) return;
-      await this.store.clearResults(projectId);
+      await this.store.clearResults(projectId, "");
       if (generation !== this.generation) return;
-      this.paused = false;
-      this.state.phase = "SCANNING";
-      this.state.message = "Reading Caido HTTP History";
-      this.publishState(sdk);
+      this.historyCutoffs.delete(projectId);
       this.scheduleDataChanged(sdk, "findings", "files", "assets");
     }
-    void this.readHistory(sdk, projectId, generation);
+    this.paused = false;
+    this.state.phase = "SCANNING";
+    this.state.message = "Reading Caido HTTP History";
+    this.publishState(sdk);
+    void this.readHistory(sdk, projectId, generation, historyCutoff);
   }
 
   pause(sdk: HunterSDK): void {
@@ -389,13 +413,12 @@ export class HunterScanner {
     this.syncState();
     this.publishState(sdk);
     for (const work of cancelledFetches)
-      void this.store
-        .upsertAsset(assetFromFetch(work, "", "CANCELLED", "Cancelled"))
-        .catch((error) =>
-          sdk.console.error(
-            `Failed to mark asset cancelled: ${safeMessage(error)}`,
-          ),
-        );
+      void this.persistDetachedAsset(
+        sdk,
+        this.generation,
+        assetFromFetch(work, "", "CANCELLED", "Cancelled"),
+        "mark asset cancelled",
+      );
     this.scheduleDataChanged(sdk, "overview", "assets");
   }
 
@@ -458,6 +481,7 @@ export class HunterScanner {
     sdk: HunterSDK,
     projectId: string,
     generation: number,
+    historyCutoff?: number,
   ): Promise<void> {
     let cursor: string | undefined;
     let inspected = 0;
@@ -481,6 +505,8 @@ export class HunterScanner {
           if (generation !== this.generation) return;
           inspected += 1;
           if (item.response === undefined) continue;
+          if (!isAfterHistoryCutoff(item.request.getCreatedAt(), historyCutoff))
+            continue;
           if (
             !this.settings.scanAllHistory &&
             !sdk.requests.inScope(item.request)
@@ -539,6 +565,7 @@ export class HunterScanner {
         const projectId = await this.currentProjectId(sdk);
         if (projectId === undefined) continue;
         const generation = this.generation;
+        const historyCutoff = this.historyCutoffs.get(projectId);
         const page = await sdk.requests
           .query()
           .descending("req", "created_at")
@@ -547,6 +574,8 @@ export class HunterScanner {
         if (generation !== this.generation) continue;
         for (const item of page.items) {
           if (item.response === undefined) continue;
+          if (!isAfterHistoryCutoff(item.request.getCreatedAt(), historyCutoff))
+            continue;
           if (
             !this.settings.scanAllHistory &&
             !sdk.requests.inScope(item.request)
@@ -698,21 +727,17 @@ export class HunterScanner {
       url.toLowerCase().includes(value),
     );
     if (exclusion !== undefined) {
-      void this.store
-        .upsertAsset(
-          assetFromFetch(
-            work,
-            "",
-            "SKIPPED",
-            `Matched auto-fetch exclusion: ${exclusion}`,
-          ),
-        )
-        .then(() => this.scheduleDataChanged(sdk, "overview", "assets"))
-        .catch((error) =>
-          sdk.console.error(
-            `Failed to record excluded asset: ${safeMessage(error)}`,
-          ),
-        );
+      void this.persistDetachedAsset(
+        sdk,
+        work.generation,
+        assetFromFetch(
+          work,
+          "",
+          "SKIPPED",
+          `Matched auto-fetch exclusion: ${exclusion}`,
+        ),
+        "record excluded asset",
+      );
       return;
     }
     const count = this.rootCounts.get(parent.rootUrl) ?? 0;
@@ -724,26 +749,25 @@ export class HunterScanner {
       return;
     }
     if (!sdk.requests.inScope(probe)) {
-      void this.store
-        .upsertAsset(assetFromFetch(work, "", "SKIPPED", "Outside Caido Scope"))
-        .then(() => this.scheduleDataChanged(sdk, "overview", "assets"))
-        .catch((error) =>
-          sdk.console.error(
-            `Failed to record skipped asset: ${safeMessage(error)}`,
-          ),
-        );
+      void this.persistDetachedAsset(
+        sdk,
+        work.generation,
+        assetFromFetch(work, "", "SKIPPED", "Outside Caido Scope"),
+        "record skipped asset",
+      );
       return;
     }
     this.rootCounts.set(parent.rootUrl, count + 1);
     this.fetchQueue.push(work);
-    void this.store
-      .upsertAsset(assetFromFetch(work, "", "QUEUED", "Waiting to fetch"))
-      .catch((error) =>
-        sdk.console.error(`Failed to queue asset: ${safeMessage(error)}`),
-      );
     this.publishState(sdk);
-    this.scheduleDataChanged(sdk, "overview", "assets");
-    this.pumpFetches(sdk);
+    void this.persistDetachedAsset(
+      sdk,
+      work.generation,
+      assetFromFetch(work, "", "QUEUED", "Waiting to fetch"),
+      "queue asset",
+    ).then((persisted) => {
+      if (persisted) this.pumpFetches(sdk);
+    });
   }
 
   private pumpFetches(sdk: HunterSDK): void {
@@ -858,6 +882,30 @@ export class HunterScanner {
       detail: clip(detail, 500),
       updatedAt: new Date().toISOString(),
     });
+  }
+
+  private async persistDetachedAsset(
+    sdk: HunterSDK,
+    generation: number,
+    asset: AssetDTO,
+    action: string,
+  ): Promise<boolean> {
+    if (generation !== this.generation) return false;
+    this.incrementActive(generation);
+    this.publishState(sdk);
+    try {
+      await this.store.upsertAsset(asset);
+      if (generation !== this.generation) return false;
+      this.scheduleDataChanged(sdk, "overview", "assets");
+      return true;
+    } catch (error) {
+      sdk.console.error(`Failed to ${action}: ${safeMessage(error)}`);
+      return false;
+    } finally {
+      this.decrementActive(generation);
+      this.publishState(sdk);
+      if (generation === this.generation) this.finishIfIdle(sdk);
+    }
   }
 
   private stopForMutation(sdk: HunterSDK, message: string): number {

@@ -198,6 +198,36 @@ describe("HunterStore", () => {
     });
 
     await store.clearResults("project-1");
+    expect(await store.overview("project-1")).toMatchObject({
+      summary: {
+        findingTotal: 0,
+        endpointTotal: 0,
+        fileTotal: 0,
+        assetTotal: 0,
+      },
+      recentFindings: [],
+    });
+    expect(
+      await store.listFindings("project-1", {
+        search: "",
+        severity: "ALL",
+        confidence: "ALL",
+        kind: "ALL",
+        status: "ALL",
+        offset: 0,
+        limit: 50,
+      }),
+    ).toMatchObject({ total: 0, items: [] });
+    const historyCutoff = await store.getHistoryCutoff("project-1");
+    expect(historyCutoff).toBeDefined();
+    expect(Number.isNaN(new Date(historyCutoff!).getTime())).toBe(false);
+    const reloadedStore = new HunterStore();
+    await reloadedStore.initialize(sdk(database));
+    expect(await reloadedStore.getHistoryCutoff("project-1")).toBe(
+      historyCutoff,
+    );
+    await reloadedStore.resetHistoryCutoff("project-1");
+    expect(await store.getHistoryCutoff("project-1")).toBeUndefined();
     await store.addFindings(
       "project-1",
       "request-3",
@@ -213,7 +243,7 @@ describe("HunterStore", () => {
       raw
         .prepare("SELECT version FROM hunter_schema WHERE key = ?")
         .get("js-secret-hunter"),
-    ).toMatchObject({ version: 3 });
+    ).toMatchObject({ version: 4 });
     raw.close();
   });
 
@@ -281,7 +311,7 @@ describe("HunterStore", () => {
       raw
         .prepare("SELECT version FROM hunter_schema WHERE key = ?")
         .get("js-secret-hunter"),
-    ).toMatchObject({ version: 3 });
+    ).toMatchObject({ version: 4 });
     expect(
       raw
         .prepare("PRAGMA table_info(findings)")

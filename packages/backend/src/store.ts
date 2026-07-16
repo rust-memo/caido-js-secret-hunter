@@ -182,9 +182,13 @@ export class HunterStore {
         key TEXT PRIMARY KEY,
         version INTEGER NOT NULL
       );
-      INSERT OR IGNORE INTO hunter_schema(key, version) VALUES('js-secret-hunter', 3);
+      CREATE TABLE IF NOT EXISTS project_state (
+        project_id TEXT PRIMARY KEY,
+        history_cutoff TEXT NOT NULL
+      );
+      INSERT OR IGNORE INTO hunter_schema(key, version) VALUES('js-secret-hunter', 4);
     `);
-    await this.migrateEndpointMetadata();
+    await this.migrateSchema();
   }
 
   async getSettings(): Promise<HunterSettings> {
@@ -673,14 +677,57 @@ export class HunterStore {
     );
   }
 
-  async clearResults(projectId: string): Promise<void> {
+  async getHistoryCutoff(projectId: string): Promise<string | undefined> {
+    const row = await this.requireDatabase()
+      .prepare("SELECT history_cutoff FROM project_state WHERE project_id = ?")
+      .then((statement) =>
+        statement.get<{ history_cutoff: string }>(projectId),
+      );
+    if (
+      row === undefined ||
+      row.history_cutoff === "" ||
+      Number.isNaN(new Date(row.history_cutoff).getTime())
+    )
+      return undefined;
+    return row.history_cutoff;
+  }
+
+  async resetHistoryCutoff(projectId: string): Promise<void> {
+    await this.requireDatabase()
+      .prepare("DELETE FROM project_state WHERE project_id = ?")
+      .then((statement) => statement.run(projectId));
+  }
+
+  async clearResults(
+    projectId: string,
+    historyCutoff = new Date().toISOString(),
+  ): Promise<void> {
     const database = this.requireDatabase();
-    await database
-      .prepare("DELETE FROM findings WHERE project_id = ?")
-      .then((statement) => statement.run(projectId));
-    await database
-      .prepare("DELETE FROM assets WHERE project_id = ?")
-      .then((statement) => statement.run(projectId));
+    await database.exec("BEGIN IMMEDIATE");
+    try {
+      await database
+        .prepare("DELETE FROM findings WHERE project_id = ?")
+        .then((statement) => statement.run(projectId));
+      await database
+        .prepare("DELETE FROM assets WHERE project_id = ?")
+        .then((statement) => statement.run(projectId));
+      if (historyCutoff === "") {
+        await database
+          .prepare("DELETE FROM project_state WHERE project_id = ?")
+          .then((statement) => statement.run(projectId));
+      } else {
+        await database
+          .prepare(
+            `INSERT INTO project_state(project_id, history_cutoff) VALUES(?, ?)
+            ON CONFLICT(project_id) DO UPDATE SET history_cutoff = excluded.history_cutoff`,
+          )
+          .then((statement) => statement.run(projectId, historyCutoff));
+      }
+      await database.exec("COMMIT");
+    } catch (error) {
+      await database.exec("ROLLBACK").catch(() => undefined);
+      throw error;
+    }
   }
 
   async ignore(
@@ -775,7 +822,7 @@ export class HunterStore {
       .then((statement) => statement.run(projectId, fingerprint));
   }
 
-  private async migrateEndpointMetadata(): Promise<void> {
+  private async migrateSchema(): Promise<void> {
     const database = this.requireDatabase();
     const columns = await database
       .prepare("PRAGMA table_info(findings)")
@@ -795,10 +842,14 @@ export class HunterStore {
           `ALTER TABLE findings ADD COLUMN ${name} ${definition}`,
         );
     await database.exec(`
+      CREATE TABLE IF NOT EXISTS project_state (
+        project_id TEXT PRIMARY KEY,
+        history_cutoff TEXT NOT NULL
+      );
       CREATE INDEX IF NOT EXISTS findings_endpoint_inventory
         ON findings(project_id, kind, endpoint_method, endpoint_scope, endpoint_canonical);
-      UPDATE hunter_schema SET version = 3
-        WHERE key = 'js-secret-hunter' AND version < 3;
+      UPDATE hunter_schema SET version = 4
+        WHERE key = 'js-secret-hunter' AND version < 4;
     `);
   }
 

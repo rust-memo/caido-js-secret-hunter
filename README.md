@@ -25,6 +25,7 @@ Professional background discovery and triage of secrets, credentials, endpoints,
 - Auto-fetch exclusions are configurable as bounded case-insensitive URL substrings; captured responses remain eligible for local analysis.
 - History, response size, recursion depth, discovered assets, retained findings, and the live work queue are bounded.
 - Saving Settings is non-destructive. Rebuild and clear operations are explicit and confirmed; matching review states and notes survive a rebuild.
+- Clear results stores a per-project checkpoint: older captured History stays cleared across reloads and project changes until you explicitly choose Scan History or Rebuild, while newly captured responses remain eligible.
 - Data is isolated per Caido project. Switching projects does not delete another project's results.
 - Existing v1.1 project databases are migrated in place. Rebuild results when you want older endpoint observations enriched with v1.2 context.
 
@@ -82,7 +83,7 @@ The installable package is generated at `dist/plugin_package.zip`. Contribution 
 
 القيم السرية الخام لا تُحفظ؛ يتم الاحتفاظ بقيمة مخفية وبصمة SHA-256 ومعاينة منقّحة فقط. جلب ملفات JavaScript تلقائيًا متوقف افتراضيًا، وأي طلب يتم تفعيله يجب أن يبقى داخل **Caido Scope**. تمرير `Cookie` أو `Authorization` يحتاج موافقة منفصلة ولا يعمل إلا لنفس المصدر تمامًا.
 
-حفظ الإعدادات لا يمسح النتائج. استخدم **Rebuild results** أو **Clear results** فقط عندما تريد ذلك صراحةً، وراجع كل نتيجة يدويًا قبل اعتبارها تسريبًا مؤكدًا.
+حفظ الإعدادات لا يمسح النتائج. عند استخدام **Clear results** تبقى النتائج القديمة محذوفة حتى بعد إعادة تحميل الإضافة أو تغيير المشروع، ولا تعود إلا عند تشغيل **Scan History** أو **Rebuild results** صراحةً. الاستجابات الجديدة تظل قابلة للتحليل. راجع كل نتيجة يدويًا قبل اعتبارها تسريبًا مؤكدًا.
 
 ## License
 

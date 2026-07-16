@@ -72,7 +72,7 @@ const saveSettings = (
 const analyzeRequest = (sdk: SDK, requestId: string): Promise<void> =>
   scanner.analyzeRequest(hunterSDK(sdk), requestId);
 const rescanHistory = (sdk: SDK): Promise<void> =>
-  scanner.rescan(hunterSDK(sdk), false);
+  scanner.rescan(hunterSDK(sdk), false, true);
 const rebuildResults = (sdk: SDK): Promise<void> =>
   scanner.rebuildResults(hunterSDK(sdk));
 const clearResults = (sdk: SDK): Promise<void> => scanner.clear(hunterSDK(sdk));

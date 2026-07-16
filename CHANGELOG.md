@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here.
 
+## 1.2.1 - 2026-07-16
+
+### Fixed
+
+- Fixed cleared findings and assets being silently restored from older Caido History after a plugin reload, project change, or background-monitor pass.
+- Added a persistent per-project History cutoff: new traffic remains eligible, while older captured responses return only after an explicit Scan History or Rebuild action.
+- Fixed stale pagination offsets showing positive tab totals with empty Findings, Endpoints, Sensitive Files, or Assets tables after destructive result changes.
+- Fixed a removed finding remaining open in the review panel after a clear or rebuild.
+- Tracked deferred asset writes as active generation work so a late queued, skipped, or cancelled asset update cannot repopulate cleared results.
+- Made findings, assets, and the clear checkpoint update in one database transaction while preserving review decisions, notes, Settings, and exclusions.
+
 ## 1.2.0 - 2026-07-16
 
 ### Added

@@ -5,6 +5,7 @@ import { onMounted, onUnmounted, ref, watch } from "vue";
 import PaginationControls from "@/components/PaginationControls.vue";
 import { useSDK } from "@/plugins/sdk";
 import {
+  correctedPageOffset,
   createRequestGate,
   formatDate,
   safeMessage,
@@ -49,6 +50,11 @@ async function load(offset: number) {
       offset,
       limit: page.value.limit,
     });
+    const corrected = correctedPageOffset(nextPage);
+    if (requestGate.isCurrent(request) && corrected !== undefined) {
+      void load(corrected);
+      return;
+    }
     if (requestGate.isCurrent(request)) page.value = nextPage;
   } catch (cause) {
     if (requestGate.isCurrent(request))
