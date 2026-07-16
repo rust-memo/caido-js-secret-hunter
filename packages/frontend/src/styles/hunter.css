@@ -72,6 +72,8 @@
 .hunter-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; padding: 24px 26px; border: 1px solid var(--hunter-border); border-radius: 16px; background: linear-gradient(115deg, rgba(244, 63, 104, 0.08), transparent 45%), var(--hunter-surface); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.13); }
 .hunter-hero h2 { max-width: 720px; margin-top: 8px; font-size: clamp(25px, 3vw, 39px); line-height: 1.05; letter-spacing: -0.055em; }
 .hunter-hero p { max-width: 680px; margin-top: 10px; color: var(--hunter-muted); line-height: 1.6; font-size: 12px; }
+.hunter-scope-status { width: fit-content; display: inline-flex; align-items: center; gap: 7px; margin-top: 12px; padding: 5px 9px; border: 1px solid rgba(74, 222, 128, 0.25); border-radius: 999px; color: #bbf7d0; background: rgba(22, 163, 74, 0.09); font-size: 9px; font-weight: 750; letter-spacing: 0.025em; }
+.hunter-scope-status.warning { border-color: rgba(251, 191, 36, 0.28); color: #fde68a; background: rgba(161, 98, 7, 0.1); }
 .hero-actions { flex: 0 0 auto; padding-bottom: 2px; }
 
 .hunter-actions { display: flex; align-items: center; gap: 8px; }
@@ -284,6 +286,12 @@
 .hunter-settings-heading { display: flex; align-items: center; gap: 11px; padding-bottom: 14px; border-bottom: 1px solid var(--hunter-border-soft); }
 .hunter-settings-heading h3 { font-size: 14px; }
 .hunter-settings-heading p { margin-top: 4px; color: var(--hunter-muted); font-size: 10px; }
+.hunter-scope-banner { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 11px 12px; border: 1px solid rgba(74, 222, 128, 0.2); border-radius: 9px; color: #bbf7d0; background: rgba(22, 163, 74, 0.065); }
+.hunter-scope-banner.warning { border-color: rgba(251, 191, 36, 0.22); color: #fde68a; background: rgba(161, 98, 7, 0.075); }
+.hunter-scope-banner > span { flex: 0 0 auto; width: 19px; height: 19px; display: grid; place-items: center; border: 1px solid currentColor; border-radius: 50%; font-size: 9px; font-weight: 850; }
+.hunter-scope-banner > div { display: flex; flex-direction: column; gap: 3px; }
+.hunter-scope-banner strong { font-size: 10px; }
+.hunter-scope-banner small { color: var(--hunter-muted); font-size: 9px; line-height: 1.45; }
 .settings-icon { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--hunter-border); border-radius: 8px; color: var(--hunter-accent-2); background: var(--hunter-surface-2); font-size: 15px; }
 .hunter-switch-row, .hunter-number-row { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--hunter-border-soft); cursor: pointer; }
 .hunter-switch-row:last-child, .hunter-number-row:last-child { border-bottom: 0; }

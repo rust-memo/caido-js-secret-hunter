@@ -8,13 +8,17 @@ All notable changes to this project are documented here.
 
 - Added an explainable endpoint Precision Engine with a 0–100 score derived from call-site, route shape, parameters, templates, endpoint-named assignments, REST-style resources, and noise penalties.
 - Added endpoint precision filters, high-precision inventory metrics, visible scoring signals in Endpoint Intelligence and Finding details, and precision metadata in HTML, JSON, and CSV reports.
-- Added schema-v6 migration support for precision scores and signals while preserving existing findings, review decisions, notes, Settings, and exclusions.
+- Added schema-v6 precision fields and a schema-v7 scope-safety migration while preserving existing findings, review decisions, notes, Settings, and exclusions.
 - Added mixed-corpus regression coverage for application routes versus dependency, localization, UI-selector, generated-asset, MIME, and unsafe-scheme noise.
+- Added a visible coverage indicator and a positive **In-scope traffic only** control that follows Caido Scope for History, live responses, and targeted Request ID analysis.
 
 ### Changed
 
 - Generic slash-relative literals now require corroborating evidence instead of being accepted solely because they contain a slash.
 - Expanded fresh-install auto-fetch exclusions with `modernizr`, `gtm`, and `fbevents`, following the practical vendor exclusions documented by BurpJSLinkFinder.
+- Made Caido Scope-only analysis the safe default for fresh and upgraded installations; enabling all-History coverage now requires an explicit warning confirmation.
+- In scope-only mode, History scans inspect a bounded deeper window to fill the eligible-response quota and report how many out-of-scope entries were skipped.
+- Suppressed cross-origin HTTP and WebSocket endpoint observations unless their destination also matches Caido Scope, while preserving same-origin routes and non-endpoint security findings from authorized responses.
 - JSON reports now use schema version 3, and the bundled detector pack is version `2026.07.5`.
 
 ### Fixed

@@ -25,7 +25,7 @@ import type {
 } from "./types";
 
 const DEFAULT_SETTINGS: HunterSettings = {
-  scanAllHistory: true,
+  scanAllHistory: false,
   autoFetch: false,
   includeCredentials: false,
   assetExclusions: [
@@ -200,7 +200,7 @@ export class HunterStore {
         project_id TEXT PRIMARY KEY,
         history_cutoff TEXT NOT NULL
       );
-      INSERT OR IGNORE INTO hunter_schema(key, version) VALUES('js-secret-hunter', 6);
+      INSERT OR IGNORE INTO hunter_schema(key, version) VALUES('js-secret-hunter', 7);
     `);
     await this.migrateSchema();
   }
@@ -834,6 +834,11 @@ export class HunterStore {
 
   private async migrateSchema(): Promise<void> {
     const database = this.requireDatabase();
+    const schema = await database
+      .prepare("SELECT version FROM hunter_schema WHERE key = ?")
+      .then((statement) =>
+        statement.get<{ version: number }>("js-secret-hunter"),
+      );
     const columns = await database
       .prepare("PRAGMA table_info(findings)")
       .then((statement) => statement.all<{ name: string }>());
@@ -880,9 +885,34 @@ export class HunterStore {
           WHEN 'HIGH' THEN 90 WHEN 'MEDIUM' THEN 70 ELSE 50 END,
         endpoint_signals = '["Legacy observation; rebuild for full precision signals"]'
         WHERE kind = 'ENDPOINT' AND endpoint_score = 0;
-      UPDATE hunter_schema SET version = 6
-        WHERE key = 'js-secret-hunter' AND version < 6;
     `);
+    if ((schema?.version ?? 7) < 7) {
+      const row = await database
+        .prepare("SELECT value FROM settings WHERE key = ?")
+        .then((statement) => statement.get<{ value: string }>("hunter"));
+      if (row !== undefined) {
+        try {
+          const legacy = JSON.parse(row.value) as Partial<HunterSettings>;
+          await database
+            .prepare("UPDATE settings SET value = ? WHERE key = ?")
+            .then((statement) =>
+              statement.run(
+                JSON.stringify({ ...legacy, scanAllHistory: false }),
+                "hunter",
+              ),
+            );
+        } catch {
+          await database
+            .prepare("DELETE FROM settings WHERE key = ?")
+            .then((statement) => statement.run("hunter"));
+        }
+      }
+    }
+    await database
+      .prepare(
+        "UPDATE hunter_schema SET version = 7 WHERE key = ? AND version < 7",
+      )
+      .then((statement) => statement.run("js-secret-hunter"));
   }
 
   private requireDatabase(): Database {

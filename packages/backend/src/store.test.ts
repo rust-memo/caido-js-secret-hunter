@@ -83,6 +83,7 @@ describe("HunterStore", () => {
     await store.initialize(sdk(database));
 
     expect(await store.getSettings()).toMatchObject({
+      scanAllHistory: false,
       autoFetch: false,
       includeCredentials: false,
       assetExclusions: expect.arrayContaining([
@@ -253,7 +254,28 @@ describe("HunterStore", () => {
       raw
         .prepare("SELECT version FROM hunter_schema WHERE key = ?")
         .get("js-secret-hunter"),
-    ).toMatchObject({ version: 6 });
+    ).toMatchObject({ version: 7 });
+    raw.close();
+  });
+
+  it("migrates legacy all-History defaults to scope-only coverage", async () => {
+    const raw = new DatabaseSync(":memory:");
+    raw.exec(`
+      CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE hunter_schema (key TEXT PRIMARY KEY, version INTEGER NOT NULL);
+      INSERT INTO hunter_schema(key, version) VALUES('js-secret-hunter', 6);
+      INSERT INTO settings(key, value) VALUES(
+        'hunter',
+        '{"scanAllHistory":true,"maxDepth":4}'
+      );
+    `);
+    const store = new HunterStore();
+    await store.initialize(sdk(asyncDatabase(raw)));
+
+    expect(await store.getSettings()).toMatchObject({
+      scanAllHistory: false,
+      maxDepth: 4,
+    });
     raw.close();
   });
 
@@ -321,7 +343,7 @@ describe("HunterStore", () => {
       raw
         .prepare("SELECT version FROM hunter_schema WHERE key = ?")
         .get("js-secret-hunter"),
-    ).toMatchObject({ version: 6 });
+    ).toMatchObject({ version: 7 });
     expect(
       raw
         .prepare("PRAGMA table_info(findings)")

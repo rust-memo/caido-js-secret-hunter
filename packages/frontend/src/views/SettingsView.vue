@@ -29,6 +29,13 @@ const maxBodyMb = computed({
   },
 });
 
+const inScopeOnly = computed({
+  get: () => !form.scanAllHistory,
+  set: (value: boolean) => {
+    form.scanAllHistory = !value;
+  },
+});
+
 const exclusionsText = computed({
   get: () => form.assetExclusions.join("\n"),
   set: (value: string) => {
@@ -38,6 +45,19 @@ const exclusionsText = computed({
 
 async function save() {
   if (busy.value) return;
+  if (form.scanAllHistory && !settings.scanAllHistory) {
+    const accepted = await confirm({
+      title: "Analyze traffic outside Caido Scope",
+      message:
+        "Allow JS Secret Hunter to analyze every captured History and live response, including domains outside Caido Scope? This can substantially increase noise and false positives. No active requests are sent by this setting.",
+      confirmLabel: "Analyze all History",
+      danger: true,
+    });
+    if (!accepted) {
+      form.scanAllHistory = false;
+      return;
+    }
+  }
   if (form.autoFetch && !settings.autoFetch) {
     const accepted = await confirm({
       title: "Enable automatic asset fetching",
@@ -153,19 +173,37 @@ async function run(action: () => Promise<unknown>, success: string) {
               <p>Choose which captured traffic can be analyzed locally.</p>
             </div>
           </div>
+          <div class="hunter-scope-banner" :class="{ warning: !inScopeOnly }">
+            <span>{{ inScopeOnly ? "✓" : "!" }}</span>
+            <div>
+              <strong>{{
+                inScopeOnly
+                  ? "Caido Scope is enforced"
+                  : "All History coverage is enabled"
+              }}</strong>
+              <small>{{
+                inScopeOnly
+                  ? "Add authorized domains to Caido Scope; only matching History and live responses are analyzed."
+                  : "Requests outside Scope may increase result volume and false positives."
+              }}</small>
+            </div>
+          </div>
           <label class="hunter-switch-row">
             <span
-              ><strong>Analyze all History</strong
+              ><strong>In-scope traffic only</strong
               ><small
-                >When off, only requests in Caido Scope are analyzed.</small
+                >Recommended. Follow Caido Scope for History, live responses,
+                and targeted analysis.</small
               ></span
             >
-            <input v-model="form.scanAllHistory" type="checkbox" />
+            <input v-model="inScopeOnly" type="checkbox" />
           </label>
           <label class="hunter-number-row">
             <span
               ><strong>History entries</strong
-              ><small>Maximum recent exchanges per manual scan.</small></span
+              ><small
+                >Maximum eligible responses selected per manual scan.</small
+              ></span
             >
             <input
               v-model.number="form.maxHistoryEntries"
