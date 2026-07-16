@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createRequestGate,
   formatDate,
   hostOf,
   safeMessage,
@@ -29,5 +30,15 @@ describe("frontend utilities", () => {
   it("normalizes unknown errors", () => {
     expect(safeMessage(new Error("boom"))).toBe("boom");
     expect(safeMessage("failure")).toBe("failure");
+  });
+
+  it("rejects stale asynchronous request tokens", () => {
+    const gate = createRequestGate();
+    const first = gate.start();
+    const second = gate.start();
+    expect(gate.isCurrent(first)).toBe(false);
+    expect(gate.isCurrent(second)).toBe(true);
+    gate.invalidate();
+    expect(gate.isCurrent(second)).toBe(false);
   });
 });

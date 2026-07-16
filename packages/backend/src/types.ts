@@ -5,6 +5,37 @@ export type FindingKind =
 export type ReviewStatus = "NEEDS_REVIEW" | "REVIEWED" | "FALSE_POSITIVE";
 export type AssetStatus =
   "QUEUED" | "FETCHING" | "SCANNED" | "SKIPPED" | "FAILED" | "CANCELLED";
+export type EndpointMethod =
+  | "ANY"
+  | "GET"
+  | "POST"
+  | "PUT"
+  | "PATCH"
+  | "DELETE"
+  | "HEAD"
+  | "OPTIONS"
+  | "CONNECT";
+export type EndpointSource =
+  | "DETECTOR"
+  | "LITERAL"
+  | "FETCH"
+  | "AXIOS"
+  | "XHR"
+  | "JQUERY"
+  | "ROUTER"
+  | "MARKUP"
+  | "WEBSOCKET";
+export type EndpointScope =
+  "SAME_ORIGIN" | "CROSS_ORIGIN" | "NON_HTTP" | "UNKNOWN";
+
+export type EndpointMetadata = {
+  method: EndpointMethod;
+  source: EndpointSource;
+  scope: EndpointScope;
+  parameters: string[];
+  dynamic: boolean;
+  canonical: string;
+};
 
 export type RuleDefinition = {
   id: string;
@@ -20,6 +51,7 @@ export type RuleDefinition = {
   minLength?: number;
   allowlistRegex?: string;
   enabled?: boolean;
+  sensitiveValue?: boolean;
 };
 
 export type RulePack = {
@@ -51,6 +83,7 @@ export type DetectedFinding = {
   preview: string;
   maskedValue: string;
   rawValue: string;
+  endpoint?: EndpointMetadata;
 };
 
 export type FindingDTO = Omit<DetectedFinding, "rawValue"> & {
@@ -141,6 +174,26 @@ export type FindingQuery = {
   status: "ALL" | ReviewStatus;
   offset: number;
   limit: number;
+};
+
+export type EndpointQuery = {
+  search: string;
+  confidence: "ALL" | Confidence;
+  status: "ALL" | ReviewStatus;
+  method: "ALL" | EndpointMethod;
+  scope: "ALL" | EndpointScope;
+  offset: number;
+  limit: number;
+};
+
+export type EndpointSummary = {
+  observations: number;
+  uniqueRoutes: number;
+  dynamicRoutes: number;
+  crossOrigin: number;
+  parameterized: number;
+  methods: Partial<Record<EndpointMethod, number>>;
+  sources: Partial<Record<EndpointSource, number>>;
 };
 
 export type FileQuery = {

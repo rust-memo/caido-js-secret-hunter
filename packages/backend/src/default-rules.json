@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "2026.07.3",
+  "version": "2026.07.4",
   "releasedAt": "2026-07-16",
   "rules": [
     {
@@ -288,6 +288,26 @@
       "secretGroup": 1
     },
     {
+      "id": "api-documentation-route",
+      "name": "OpenAPI or Swagger documentation route",
+      "kind": "ENDPOINT",
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "keywords": ["openapi", "swagger", "api-docs"],
+      "regex": "(?i)((?:https?://[^\\s'\"<>]+)?/(?:openapi(?:\\.(?:json|ya?ml))?|swagger(?:\\.json|/index\\.html)?|v[23]/api-docs)(?:[/?][^\\s'\"<>]*)?)",
+      "secretGroup": 1
+    },
+    {
+      "id": "health-metrics-route",
+      "name": "Health, readiness, or metrics route",
+      "kind": "ENDPOINT",
+      "severity": "MEDIUM",
+      "confidence": "MEDIUM",
+      "keywords": ["/health", "/ready", "/metrics"],
+      "regex": "(?i)(/(?:healthz?|readyz?|metrics)(?:[/?][A-Za-z0-9._~!$&()*+,;=:@%/-]*)?)",
+      "secretGroup": 1
+    },
+    {
       "id": "websocket-endpoint",
       "name": "WebSocket endpoint",
       "kind": "ENDPOINT",
@@ -438,7 +458,8 @@
       "confidence": "HIGH",
       "keywords": ["sentry", "ingest.sentry.io"],
       "regex": "(?i)\\b(https://[0-9a-f]{16,64}(?::[0-9a-f]{16,64})?@[A-Za-z0-9.-]*sentry\\.io/[0-9]+)\\b",
-      "secretGroup": 1
+      "secretGroup": 1,
+      "sensitiveValue": true
     }
   ]
 }

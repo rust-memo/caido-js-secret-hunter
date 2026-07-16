@@ -2,6 +2,8 @@ import type { SDK } from "caido:plugin";
 import type { Request, RequestResponse, Response } from "caido:utils";
 import { RequestSpec } from "caido:utils";
 
+import { classifyContent } from "./content-classifier";
+import type { ContentClass } from "./content-classifier";
 import { rulePack, scanText } from "./detector";
 import { buildReport } from "./report";
 import { HunterStore } from "./store";
@@ -9,6 +11,8 @@ import type {
   AssetDTO,
   AssetQuery,
   DataArea,
+  EndpointQuery,
+  EndpointSummary,
   FileQuery,
   FindingDTO,
   FindingQuery,
@@ -27,9 +31,6 @@ import type {
 import type { BackendEvents } from "./index";
 
 export type HunterSDK = SDK<Record<string, never>, BackendEvents>;
-
-type ContentClass =
-  "JAVASCRIPT" | "HTML" | "JSON" | "XML" | "TEXT" | "SOURCE_MAP" | "BINARY";
 
 type Work = {
   generation: number;
@@ -145,6 +146,17 @@ export class HunterScanner {
     query: FindingQuery,
   ): Promise<Page<FindingDTO>> {
     return this.store.listFindings(await this.requireProjectId(sdk), query);
+  }
+
+  async listEndpoints(
+    sdk: HunterSDK,
+    query: EndpointQuery,
+  ): Promise<Page<FindingDTO>> {
+    return this.store.listEndpoints(await this.requireProjectId(sdk), query);
+  }
+
+  async getEndpointSummary(sdk: HunterSDK): Promise<EndpointSummary> {
+    return this.store.endpointSummary(await this.requireProjectId(sdk));
   }
 
   async listFiles(
@@ -609,11 +621,6 @@ export class HunterScanner {
 
   private async process(sdk: HunterSDK, work: Work): Promise<void> {
     if (work.generation !== this.generation) return;
-    const contentClass = classify(work.request, work.response, work.url);
-    if (contentClass === "BINARY") {
-      await this.saveAsset(work, "SKIPPED", "Non-text response");
-      return;
-    }
     const body = work.response.getBody();
     if (body === undefined) {
       await this.saveAsset(work, "SKIPPED", "Empty response body");
@@ -630,6 +637,16 @@ export class HunterScanner {
         "SKIPPED",
         `Body exceeds ${this.settings.maxBodyBytes} byte limit`,
       );
+      return;
+    }
+    const contentClass = classifyContent({
+      contentType: (work.response.getHeader("Content-Type") ?? []).join(" "),
+      url: work.url,
+      method: work.request.getMethod(),
+      bytes: raw,
+    });
+    if (contentClass === "BINARY") {
+      await this.saveAsset(work, "SKIPPED", "Non-text response");
       return;
     }
     const text = body.toText();
@@ -984,38 +1001,6 @@ function emptySummary() {
     assetTotal: 0,
     published: 0,
   };
-}
-
-function classify(
-  request: Request,
-  response: Response,
-  url: string,
-): ContentClass {
-  const contentType = (response.getHeader("Content-Type") ?? [])
-    .join(" ")
-    .toLowerCase();
-  const path = url.toLowerCase().split(/[?#]/, 1)[0] ?? "";
-  if (path.endsWith(".map")) return "SOURCE_MAP";
-  if (
-    /\.(?:m?js|cjs)$/.test(path) ||
-    contentType.includes("javascript") ||
-    contentType.includes("ecmascript")
-  )
-    return "JAVASCRIPT";
-  if (
-    contentType.includes("html") ||
-    path.endsWith(".html") ||
-    path.endsWith(".htm")
-  )
-    return "HTML";
-  if (contentType.includes("json") || path.endsWith(".json")) return "JSON";
-  if (contentType.includes("xml") || path.endsWith(".xml")) return "XML";
-  if (
-    contentType.startsWith("text/") ||
-    request.getMethod().toUpperCase() === "OPTIONS"
-  )
-    return "TEXT";
-  return "BINARY";
 }
 
 function discoverAssets(

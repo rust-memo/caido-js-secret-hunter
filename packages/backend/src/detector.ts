@@ -2,7 +2,10 @@ import { Buffer } from "buffer";
 import { createHash } from "crypto";
 
 import bundledRules from "./default-rules.json";
-import { extractEndpointReferences } from "./endpoint-extractor";
+import {
+  describeEndpoint,
+  extractEndpointReferences,
+} from "./endpoint-extractor";
 import type {
   DetectedFinding,
   FindingKind,
@@ -36,6 +39,11 @@ const compiledRules = rulePack.rules
 const linkReferenceRule = rulePack.rules.find(
   (rule) => rule.engine === "LINK_REFERENCE" && rule.enabled !== false,
 );
+const sensitiveConfigurationRules = new Set(
+  rulePack.rules
+    .filter((rule) => rule.sensitiveValue === true)
+    .map((rule) => rule.id),
+);
 
 export function scanText(text: string, assetUrl: string): DetectedFinding[] {
   if (text.trim().length === 0) return [];
@@ -50,7 +58,8 @@ export function scanText(text: string, assetUrl: string): DetectedFinding[] {
   const sensitiveValues = findings
     .filter(
       (finding) =>
-        finding.kind !== "ENDPOINT" && finding.kind !== "CONFIGURATION",
+        (finding.kind !== "ENDPOINT" && finding.kind !== "CONFIGURATION") ||
+        sensitiveConfigurationRules.has(finding.ruleId),
     )
     .map((finding) => finding.rawValue)
     .sort((left, right) => right.length - left.length);
@@ -66,7 +75,11 @@ function scanLinkReferences(
   assetUrl: string,
   output: Map<string, DetectedFinding>,
 ): void {
-  for (const reference of extractEndpointReferences(view.text, decodeEscapes)) {
+  for (const reference of extractEndpointReferences(
+    view.text,
+    decodeEscapes,
+    assetUrl,
+  )) {
     const start = Math.max(0, view.sourceOffset + reference.start);
     const end = Math.max(start, view.sourceOffset + reference.end);
     const valueHash = sha256(reference.value);
@@ -80,7 +93,7 @@ function scanLinkReferences(
       ruleName: definition.name,
       kind: definition.kind,
       severity: definition.severity,
-      confidence: definition.confidence,
+      confidence: reference.confidence,
       assetUrl,
       line:
         view.label === "source"
@@ -94,8 +107,9 @@ function scanLinkReferences(
         reference.end,
         reference.raw,
       )}`,
-      maskedValue: redactUrlValue(resolveReference(reference.value, assetUrl)),
+      maskedValue: reference.presentation,
       rawValue: reference.value,
+      endpoint: reference.metadata,
     });
   }
 }
@@ -103,6 +117,17 @@ function scanLinkReferences(
 function suppressGenericEndpointDuplicates(
   findings: DetectedFinding[],
 ): DetectedFinding[] {
+  const generic = new Map<string, DetectedFinding>();
+  for (const finding of findings) {
+    if (finding.ruleId !== "javascript-link-reference") continue;
+    const current = generic.get(finding.valueHash);
+    if (
+      current === undefined ||
+      (current.endpoint?.source === "LITERAL" &&
+        finding.endpoint?.source !== "LITERAL")
+    )
+      generic.set(finding.valueHash, finding);
+  }
   const specific = new Set(
     findings
       .filter(
@@ -112,11 +137,24 @@ function suppressGenericEndpointDuplicates(
       )
       .map((finding) => finding.valueHash),
   );
-  return findings.filter(
-    (finding) =>
-      finding.ruleId !== "javascript-link-reference" ||
-      !specific.has(finding.valueHash),
-  );
+  return findings
+    .filter(
+      (finding) =>
+        finding.ruleId !== "javascript-link-reference" ||
+        !specific.has(finding.valueHash),
+    )
+    .map((finding) => {
+      const context = generic.get(finding.valueHash);
+      return finding.ruleId !== "javascript-link-reference" &&
+        finding.kind === "ENDPOINT" &&
+        context?.endpoint !== undefined
+        ? {
+            ...finding,
+            maskedValue: context.maskedValue,
+            endpoint: context.endpoint,
+          }
+        : finding;
+    });
 }
 
 function scanRule(
@@ -166,6 +204,10 @@ function scanRule(
     const fingerprint = sha256(
       `${assetUrl}\n${rule.definition.id}\n${start}\n${valueHash}`,
     );
+    const endpoint =
+      rule.definition.kind === "ENDPOINT"
+        ? describeEndpoint(value, assetUrl)
+        : undefined;
     output.set(`${rule.definition.id}\n${value}\n${start}`, {
       fingerprint,
       valueHash,
@@ -182,8 +224,13 @@ function scanRule(
       start,
       end,
       preview: `${view.label} | ${snippet(view.text, localStart, localEnd, value)}`,
-      maskedValue: maskForKind(value, rule.definition.kind),
+      maskedValue:
+        endpoint?.presentation ??
+        (rule.definition.sensitiveValue === true
+          ? mask(value)
+          : maskForKind(value, rule.definition.kind)),
       rawValue: value,
+      endpoint: endpoint?.metadata,
     });
     if (rule.regex.lastIndex === match.index) rule.regex.lastIndex += 1;
   }
@@ -372,9 +419,9 @@ function redactPreview(value: string, sensitiveValues: string[]): string {
       /^(Authorization|Cookie|Set-Cookie|Proxy-Authorization):.*$/gim,
       "$1: [REDACTED]",
     )
-    .replace(/((?:https?|wss?):\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1[REDACTED]@")
+    .replace(/((?:https?|wss?):\/\/)[^\s/@]+@/gi, "$1[REDACTED]@")
     .replace(
-      /([?&](?:access_token|api[_-]?key|auth|code|key|password|secret|session|token)=)[^&#\s]+/gi,
+      /([?&](?:access_token|api[_-]?key|auth|code|credential|key|password|secret|session|sig|signature|token|x-amz-signature)=)[^&#\s]+/gi,
       "$1[REDACTED]",
     );
   for (const secret of sensitiveValues)
@@ -384,21 +431,11 @@ function redactPreview(value: string, sensitiveValues: string[]): string {
 
 function redactUrlValue(value: string): string {
   return value
-    .replace(/((?:https?|wss?):\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1[REDACTED]@")
+    .replace(/((?:https?|wss?):\/\/)[^\s/@]+@/gi, "$1[REDACTED]@")
     .replace(
-      /([?&](?:access_token|api[_-]?key|auth|code|key|password|secret|session|token)=)[^&#\s]+/gi,
+      /([?&](?:access_token|api[_-]?key|auth|code|credential|key|password|secret|session|sig|signature|token|x-amz-signature)=)[^&#\s]+/gi,
       "$1[REDACTED]",
     );
-}
-
-function resolveReference(value: string, assetUrl: string): string {
-  if (value.includes("{param}")) return value;
-  try {
-    // eslint-disable-next-line compat/compat -- Caido's plugin runtime provides the URL API.
-    return new URL(value, assetUrl).toString();
-  } catch {
-    return value;
-  }
 }
 
 function mask(value: string): string {
